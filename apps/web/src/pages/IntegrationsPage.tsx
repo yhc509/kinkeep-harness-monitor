@@ -1,0 +1,209 @@
+import { useState } from "react";
+import { Blocks, Clock3, PlugZap, RefreshCw, Settings2, Wrench } from "lucide-react";
+import {
+  apiResourceKeys,
+  getHookDetail,
+  getIntegrations,
+  getSkillDetail,
+  refreshIntegrations
+} from "../api";
+import { AsyncPane } from "../components/AsyncPane";
+import { DetailModal } from "../components/DetailModal";
+import { Panel } from "../components/Panel";
+import { useApiResource } from "../hooks/useApiResource";
+import { formatDateTime, formatNumber } from "../utils/format";
+
+type DetailTarget =
+  | { type: "hook"; id: string }
+  | { type: "skill"; id: string }
+  | null;
+
+export function IntegrationsPage() {
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<DetailTarget>(null);
+  const integrations = useApiResource(() => getIntegrations(), {
+    deps: [],
+    cacheKey: apiResourceKeys.integrations,
+    staleTimeMs: 0
+  });
+  const hookDetail = useApiResource(
+    () => detailTarget?.type === "hook" ? getHookDetail(detailTarget.id) : Promise.resolve(null),
+    {
+      deps: [detailTarget?.type, detailTarget?.id],
+      cacheKey: apiResourceKeys.hookDetail(detailTarget?.type === "hook" ? detailTarget.id : ""),
+      enabled: detailTarget?.type === "hook",
+      keepPreviousData: false,
+      staleTimeMs: 60_000
+    }
+  );
+  const skillDetail = useApiResource(
+    () => detailTarget?.type === "skill" ? getSkillDetail(detailTarget.id) : Promise.resolve(null),
+    {
+      deps: [detailTarget?.type, detailTarget?.id],
+      cacheKey: apiResourceKeys.skillDetail(detailTarget?.type === "skill" ? detailTarget.id : ""),
+      enabled: detailTarget?.type === "skill",
+      keepPreviousData: false,
+      staleTimeMs: 60_000
+    }
+  );
+
+  async function handleRefresh() {
+    try {
+      setRefreshBusy(true);
+      await refreshIntegrations();
+      integrations.refresh();
+    } finally {
+      setRefreshBusy(false);
+    }
+  }
+
+  return (
+    <div className="page-stack">
+      <section className="page-heading">
+        <div>
+          <p className="eyebrow">INTEGRATIONS</p>
+          <h2>MCP / Hooks / Skills</h2>
+        </div>
+        {integrations.data ? (
+          <div className="page-chip-group">
+            <div className="page-chip">
+              <PlugZap size={14} strokeWidth={2.2} />
+              <span>{formatNumber(integrations.data.mcpServers.length)} MCP</span>
+            </div>
+            <div className="page-chip">
+              <Blocks size={14} strokeWidth={2.2} />
+              <span>{formatNumber(integrations.data.skills.length)} Skills</span>
+            </div>
+            <div className="page-chip">
+              <Wrench size={14} strokeWidth={2.2} />
+              <span>{formatNumber(integrations.data.hooks.length)} Hooks</span>
+            </div>
+            <div className="page-chip">
+              <Clock3 size={14} strokeWidth={2.2} />
+              <span>{formatDateTime(integrations.data.lastSyncedAt)}</span>
+            </div>
+            {integrations.refreshing || refreshBusy ? (
+              <div className="page-chip loading-chip">
+                <RefreshCw size={14} strokeWidth={2.2} />
+                <span>새로고침</span>
+              </div>
+            ) : null}
+            {integrations.data.isStale ? (
+              <div className="page-chip stale-chip">
+                <RefreshCw size={14} strokeWidth={2.2} />
+                <span>캐시 갱신 대기</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <button className="ghost-button" disabled={refreshBusy} onClick={handleRefresh}>
+          <RefreshCw size={14} strokeWidth={2.2} />
+          {refreshBusy ? "새로고침 중" : "지금 새로고침"}
+        </button>
+      </section>
+
+      <AsyncPane loading={integrations.initialLoading} error={integrations.error} hasData={integrations.hasData}>
+        {integrations.data ? (
+          <>
+            <div className="two-column">
+              <Panel title="MCP" subtitle="최근 호출 흔적 포함" icon={<PlugZap size={16} strokeWidth={2.2} />}>
+                <div className="integration-list dense-list">
+                  {integrations.data.mcpServers.map((server) => (
+                    <article key={server.name} className="integration-card">
+                      <header>
+                        <h3>{server.name}</h3>
+                        <span>{formatNumber(server.usageCount)} calls</span>
+                      </header>
+                      <p>{server.url ?? "URL 없음"}</p>
+                      <small>{server.toolNames.join(", ") || "도구 호출 없음"}</small>
+                    </article>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel title="Hooks" subtitle="요약" icon={<Wrench size={16} strokeWidth={2.2} />}>
+                <div className="integration-list dense-list">
+                  {integrations.data.hooks.map((hook) => (
+                    <button
+                      key={hook.id}
+                      type="button"
+                      className="detail-row integration-card"
+                      onClick={() => setDetailTarget({ type: "hook", id: hook.id })}
+                    >
+                      <header>
+                        <h3>{hook.name}</h3>
+                        <span>{hook.kind}</span>
+                      </header>
+                      <p>{hook.preview}</p>
+                      <small>{hook.source}</small>
+                    </button>
+                  ))}
+                </div>
+              </Panel>
+            </div>
+
+            <Panel title="Skills" subtitle="이름" icon={<Settings2 size={16} strokeWidth={2.2} />}>
+              <div className="compact-skill-grid">
+                {integrations.data.skills.map((skill) => (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    className="detail-row skill-name-row"
+                    onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
+                  >
+                    <div className="skill-name-row-header">
+                      <h3>{skill.name}</h3>
+                      <span className={`skill-source ${skill.source}`}>{skill.source}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          </>
+        ) : null}
+      </AsyncPane>
+
+      <DetailModal
+        open={detailTarget?.type === "hook"}
+        title={hookDetail.data?.name ?? "Hook"}
+        subtitle={hookDetail.data?.source}
+        onClose={() => setDetailTarget(null)}
+      >
+        <AsyncPane loading={hookDetail.initialLoading} error={hookDetail.error} hasData={hookDetail.hasData}>
+          {hookDetail.data ? (
+            <div className="modal-stack">
+              <div className="page-chip-group">
+                <div className="page-chip">
+                  <Wrench size={14} strokeWidth={2.2} />
+                  <span>{hookDetail.data.kind}</span>
+                </div>
+              </div>
+              <pre className="modal-pre">{hookDetail.data.command}</pre>
+            </div>
+          ) : null}
+        </AsyncPane>
+      </DetailModal>
+
+      <DetailModal
+        open={detailTarget?.type === "skill"}
+        title={skillDetail.data?.name ?? "Skill"}
+        subtitle={skillDetail.data?.path}
+        onClose={() => setDetailTarget(null)}
+      >
+        <AsyncPane loading={skillDetail.initialLoading} error={skillDetail.error} hasData={skillDetail.hasData}>
+          {skillDetail.data ? (
+            <div className="modal-stack">
+              <div className="page-chip-group">
+                <div className="page-chip">
+                  <Settings2 size={14} strokeWidth={2.2} />
+                  <span>{skillDetail.data.source}</span>
+                </div>
+              </div>
+              <pre className="modal-pre">{skillDetail.data.content}</pre>
+            </div>
+          ) : null}
+        </AsyncPane>
+      </DetailModal>
+    </div>
+  );
+}
