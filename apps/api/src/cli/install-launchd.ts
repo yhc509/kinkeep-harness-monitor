@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../config";
 
-const LABEL = "com.codex-monitor.token-snapshot";
+const LABEL = "com.harness-monitor.token-snapshot";
 const require = createRequire(import.meta.url);
 
 const config = loadConfig();

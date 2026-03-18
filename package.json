@@ -1,5 +1,5 @@
 {
-  "name": "codex-monitor",
+  "name": "harness-monitor",
   "private": true,
   "packageManager": "pnpm@10.26.2",
   "scripts": {

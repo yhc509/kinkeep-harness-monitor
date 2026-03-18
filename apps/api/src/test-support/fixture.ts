@@ -13,7 +13,7 @@ export interface TestFixture {
 
 export function createTestFixture(options: { stage1Mode?: "ready" | "empty" | "unsupported" } = {}): TestFixture {
   const stage1Mode = options.stage1Mode ?? "ready";
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-monitor-"));
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-monitor-"));
   const codexHome = path.join(rootDir, ".codex");
   const agentsHome = path.join(rootDir, ".agents");
   const sessionsDir = path.join(codexHome, "sessions", "2026", "03", "14");

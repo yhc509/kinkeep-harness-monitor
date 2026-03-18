@@ -1,59 +1,69 @@
-# Codex Monitor
+# Harness-Monitor
 
-Codex CLI 로컬 상태를 읽어서 세션, 메모리, 통합, 토큰 흐름을 한눈에 보는 개인용 모니터입니다.
+Harness-Monitor is a local monitoring UI for Codex CLI activity. It reads local Codex data and turns sessions, memory, integrations, and token usage into a single web dashboard.
 
-현재는 `Codex` provider를 기준으로 동작합니다. 설정 구조는 provider 단위로 나뉘어 있어서 이후 다른 도구를 붙일 여지는 열어둔 상태입니다.
+The project currently runs on the `Codex` provider. The data layer is already split by provider so `Claude Code` can be added later without rewriting the whole app.
 
-## 화면 구성
+## Screenshots
 
-### 대시보드
+### Dashboard
 
-- 오늘 토큰 합계
-- 최근 동기화 시각과 상태
-- 최근 1년 활동 히트맵
+![Dashboard](docs/screenshots/dashboard.png)
 
-### 세션
+### Tokens
 
-- 프로젝트별 세션 목록
-- 검색, 정렬, 서브에이전트 포함 여부 필터
-- 세션별 타임라인과 상세 이벤트
+![Tokens](docs/screenshots/tokens.png)
 
-### 메모리
+## What You Can See
 
-- `developer_instructions` 기반 개인 선호
-- stage1 memory 추출 여부
-- 세션 메모리 목록과 raw memory
+### Dashboard
 
-### 통합
+- Today token usage
+- Latest sync time and collector status
+- 1-year activity heatmap
 
-- MCP 서버, Skills, Hooks 인벤토리
-- 최근 사용량과 상세 정보
+### Sessions
 
-### 토큰
+- Project-based session list
+- Search, sorting, and subagent filters
+- Session timeline and event-level detail
 
-- 최근 `7일`, `30일`, `90일` 일별 총 토큰 차트
-- 모델 사용 비율 도넛 차트
-- 프로젝트별 토큰 분포 버블 차트
-- `일별`, `주별`, `월별` 기준 프로젝트 토큰 이동
-- 최근 48시간 시간별 토큰 합계
+### Memory
 
-## 데이터 원천
+- Personal preference from `developer_instructions`
+- Stage 1 memory extraction status
+- Session memory list and raw memory
 
-- 기본 데이터 원천은 `~/.codex`와 `~/.agents`입니다.
-- 토큰 집계는 `~/.codex/sessions/**/*.jsonl`의 `token_count` 이벤트를 읽어 캐시합니다.
-- 첫 동기화에서는 과거 rollout 로그를 백필하고, 이후에는 바뀐 파일만 다시 읽습니다.
-- 프로젝트 토큰은 rollout의 `session_meta.cwd`와 thread 정보로 프로젝트를 복구해 집계합니다.
-- 모델 사용 비율은 turn별 모델 정보를 따라가며 `token_count`를 모델 단위로 누적합니다.
+### Integrations
 
-## 실행
+- MCP servers, skills, and hooks inventory
+- Recent usage and detail views
 
-의존성 설치:
+### Tokens
+
+- Daily total token chart for `7`, `30`, and `90` day ranges
+- Model usage ratio donut chart
+- Project token distribution bubble chart
+- Project token navigation by `day`, `week`, and `month`
+- Hourly token totals for the last 48 hours
+
+## Data Sources
+
+- The main data sources are `~/.codex` and `~/.agents`.
+- Token analytics are built from `token_count` events in `~/.codex/sessions/**/*.jsonl`.
+- The first sync backfills old rollout logs, then later syncs only re-read changed files.
+- Project token usage is recovered from rollout `session_meta.cwd` and thread metadata.
+- Model usage tracks the active model per turn and attributes `token_count` deltas to that model.
+
+## Run
+
+Install dependencies:
 
 ```bash
 pnpm install
 ```
 
-개발 서버:
+Start the development servers:
 
 ```bash
 pnpm dev
@@ -62,18 +72,18 @@ pnpm dev
 - API: `http://127.0.0.1:4318`
 - Web UI: `http://127.0.0.1:4174`
 
-프로덕션처럼 한 포트로 실행:
+Run the production-style single-port server:
 
 ```bash
 pnpm build
 pnpm start
 ```
 
-- 통합 서버/UI: `http://127.0.0.1:4318`
+- Combined server and UI: `http://127.0.0.1:4318`
 
-## 주요 명령
+## Useful Commands
 
-전체 검증:
+Run the full validation set:
 
 ```bash
 pnpm test
@@ -81,41 +91,43 @@ pnpm typecheck
 pnpm build
 ```
 
-토큰 캐시 수동 동기화:
+Run a manual token cache sync:
 
 ```bash
 pnpm collector:snapshot
 ```
 
-토큰 수집 launchd plist 생성:
+Generate the launchd plist for token collection:
 
 ```bash
 pnpm collector:install-launchd
 ```
 
-서버 자동 실행용 launchd plist 생성:
+Generate the launchd plist for starting the server on login:
 
 ```bash
 pnpm server:install-launchd
 ```
 
-두 launchd 명령은 plist를 만든 뒤 `launchctl bootstrap ...` 예시를 출력합니다. 출력된 명령으로 직접 등록하면 됩니다.
+Both launchd commands print a `launchctl bootstrap ...` example after the plist is generated.
 
-## 환경 변수
+## Environment Variables
 
-| 이름 | 기본값 | 설명 |
+| Name | Default | Description |
 | --- | --- | --- |
-| `HOST` | `127.0.0.1` | API 바인드 주소 |
-| `PORT` | `4318` | API 포트 |
-| `MONITOR_DB` | `<repo>/data/monitor.sqlite` | 모니터 SQLite 경로 |
-| `MONITOR_PROVIDER` | `codex` | 활성 provider. 현재 실제 지원값은 `codex` |
-| `CODEX_HOME` | `~/.codex` | Codex 데이터 루트 |
-| `AGENTS_HOME` | `~/.agents` | Agents 데이터 루트 |
-| `CLAUDE_CODE_HOME` | `~/.claude` | 향후 provider 확장 대비 경로 |
+| `HOST` | `127.0.0.1` | API bind address |
+| `PORT` | `4318` | API port |
+| `MONITOR_DB` | `<repo>/data/monitor.sqlite` | Monitor SQLite path |
+| `MONITOR_PROVIDER` | `codex` | Active provider. `Claude Code` is planned, but `codex` is the only live provider today |
+| `CODEX_HOME` | `~/.codex` | Codex data root |
+| `AGENTS_HOME` | `~/.agents` | Agents data root |
+| `CLAUDE_CODE_HOME` | `~/.claude` | Reserved path for future Claude Code support |
 
-## 구현 메모
+## Implementation Notes
 
-- API 서버는 Fastify, 프론트는 React + Vite로 구성되어 있습니다.
-- 토큰 페이지의 프로젝트 버블 차트는 `d3-hierarchy` 패킹 레이아웃으로 그립니다.
-- 모델 사용 비율 차트는 `Recharts` 도넛 차트를 사용합니다.
-- 정적 빌드가 있으면 API 서버가 `apps/web/dist`를 함께 서빙합니다.
+- The API server uses Fastify.
+- The web app uses React and Vite.
+- Shared response schemas live in `packages/shared` and are defined with Zod.
+- The project bubble chart uses `d3-hierarchy` packing.
+- The model usage ratio chart uses `Recharts`.
+- When a web build exists, the API server also serves `apps/web/dist`.
