@@ -128,6 +128,22 @@ export const tokenSyncStatsSchema = z.object({
   tokenEvents: z.number()
 });
 
+export const tokenPeriodUnitSchema = z.enum(["day", "week", "month"]);
+
+export const projectTokenUsageItemSchema = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  projectPath: z.string(),
+  totalTokens: z.number(),
+  requestCount: z.number()
+});
+
+export const modelTokenUsageItemSchema = z.object({
+  modelName: z.string(),
+  modelProvider: z.string().nullable(),
+  totalTokens: z.number()
+});
+
 export const overviewStatsSchema = z.object({
   totalSessions: z.number(),
   activeToday: z.number(),
@@ -140,6 +156,7 @@ export const overviewStatsSchema = z.object({
 export const overviewResponseSchema = z.object({
   stats: overviewStatsSchema,
   daily: z.array(dailyTokenPointSchema),
+  heatmapDaily: z.array(dailyTokenPointSchema),
   averageTokens7d: tokenBreakdownSchema,
   lastSyncedAt: z.string().nullable(),
   collector: collectorRunSchema.nullable()
@@ -166,7 +183,9 @@ export const memoryResponseSchema = z.object({
   totalThreads: z.number(),
   hasStage1OutputsTable: z.boolean(),
   stage1OutputCount: z.number(),
-  sourceStatus: z.enum(["ready", "empty", "unsupported"])
+  sourceStatus: z.enum(["ready", "empty", "unsupported"]),
+  developerInstructions: z.string().nullable(),
+  personality: z.string().nullable()
 });
 
 export const mcpServerSummarySchema = z.object({
@@ -215,8 +234,20 @@ export const tokensResponseSchema = z.object({
   currentHourTokens: tokenBreakdownSchema,
   daily: z.array(dailyTokenPointSchema),
   hourly: z.array(hourlyTokenUsageSchema),
+  modelUsage: z.array(modelTokenUsageItemSchema),
   collectorRuns: z.array(collectorRunSchema),
   lastSyncedAt: z.string().nullable()
+});
+
+export const projectTokenUsageResponseSchema = z.object({
+  unit: tokenPeriodUnitSchema,
+  anchorDay: z.string(),
+  periodStart: z.string(),
+  periodEnd: z.string(),
+  label: z.string(),
+  isCurrentPeriod: z.boolean(),
+  totalTokens: z.number(),
+  projects: z.array(projectTokenUsageItemSchema)
 });
 
 export const tokenSyncResultSchema = z.object({
@@ -235,6 +266,9 @@ export type HourlyTokenUsage = z.infer<typeof hourlyTokenUsageSchema>;
 export type TokenBreakdown = z.infer<typeof tokenBreakdownSchema>;
 export type DailyTokenPoint = z.infer<typeof dailyTokenPointSchema>;
 export type TokenSyncStats = z.infer<typeof tokenSyncStatsSchema>;
+export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;
+export type ProjectTokenUsageItem = z.infer<typeof projectTokenUsageItemSchema>;
+export type ModelTokenUsageItem = z.infer<typeof modelTokenUsageItemSchema>;
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
 export type MemoryResponse = z.infer<typeof memoryResponseSchema>;
@@ -245,4 +279,5 @@ export type SkillDetail = z.infer<typeof skillDetailSchema>;
 export type HookDetail = z.infer<typeof hookDetailSchema>;
 export type IntegrationsResponse = z.infer<typeof integrationsResponseSchema>;
 export type TokensResponse = z.infer<typeof tokensResponseSchema>;
+export type ProjectTokenUsageResponse = z.infer<typeof projectTokenUsageResponseSchema>;
 export type TokenSyncResult = z.infer<typeof tokenSyncResultSchema>;

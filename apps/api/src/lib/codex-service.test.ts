@@ -28,6 +28,8 @@ describe("CodexDataService", () => {
     expect(detail?.subagents).toHaveLength(2);
     expect(detail?.subagents[0]?.subagentNickname).toBe("Boyle");
     expect(detail?.subagents[1]?.subagentRole).toBe("explorer");
+    expect(detail?.timeline.find((item) => item.kind === "tool_call" && item.toolName === "spawn_agent")?.metadata.callId).toBe("call-spawn-1");
+    expect(detail?.timeline.find((item) => item.kind === "tool_result" && item.toolName === "spawn_agent")?.title).toBe("Tool output: spawn_agent");
   });
 
   it("프로젝트를 git 루트 우선으로 묶고, 기본 목록에서는 서브에이전트를 숨긴다", () => {
@@ -77,6 +79,8 @@ describe("CodexDataService", () => {
     expect(memory.entries[0]?.rawMemory).toBe("기억된 메모리");
     expect(memory.sourceStatus).toBe("ready");
     expect(memory.stage1OutputCount).toBe(1);
+    expect(memory.developerInstructions).toContain("근본 원인");
+    expect(memory.personality).toBe("friendly");
 
     service.refreshIntegrationsUsage(new Date("2026-03-14T10:15:00+09:00"));
     const integrations = service.getIntegrations();
@@ -102,6 +106,7 @@ describe("CodexDataService", () => {
     const emptyMemory = emptyService.getMemory();
     expect(emptyMemory.sourceStatus).toBe("empty");
     expect(emptyMemory.stage1OutputCount).toBe(0);
+    expect(emptyMemory.developerInstructions).toContain("한국어 응답");
 
     const unsupportedFixture = createTestFixture({ stage1Mode: "unsupported" });
     fixtures.push(unsupportedFixture);
@@ -109,5 +114,6 @@ describe("CodexDataService", () => {
     const unsupportedMemory = unsupportedService.getMemory();
     expect(unsupportedMemory.sourceStatus).toBe("unsupported");
     expect(unsupportedMemory.hasStage1OutputsTable).toBe(false);
+    expect(unsupportedMemory.personality).toBe("friendly");
   });
 });

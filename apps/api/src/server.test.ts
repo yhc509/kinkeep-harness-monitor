@@ -30,6 +30,7 @@ describe("API server", () => {
     expect(overview.statusCode).toBe(200);
     expect(overview.json().collector).not.toBeNull();
     expect(overview.json().daily).toHaveLength(7);
+    expect(overview.json().heatmapDaily).toHaveLength(365);
     expect(overview.json().stats.todayTokens).toEqual({
       totalTokens: 0,
       cachedInputTokens: 0,
@@ -72,6 +73,21 @@ describe("API server", () => {
     });
     expect(tokens.statusCode).toBe(200);
     expect(tokens.json().daily.some((entry: { totalTokens: number }) => entry.totalTokens === 140)).toBe(true);
+    expect(tokens.json().modelUsage).toEqual([
+      {
+        modelName: "gpt-5.4",
+        modelProvider: "openai",
+        totalTokens: 140
+      }
+    ]);
+
+    const projectUsage = await app.inject({
+      method: "GET",
+      url: "/api/tokens/project-usage?unit=day&anchor=2026-03-14"
+    });
+    expect(projectUsage.statusCode).toBe(200);
+    expect(projectUsage.json().unit).toBe("day");
+    expect(projectUsage.json().projects[0].projectName).toBe("demo-project");
 
     const integrations = await app.inject({
       method: "GET",

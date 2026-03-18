@@ -6,18 +6,19 @@ import staticPlugin from "@fastify/static";
 import { overviewResponseSchema } from "@codex-monitor/shared";
 import type { AppConfig } from "./config";
 import { loadConfig } from "./config";
-import { CodexDataService } from "./lib/codex-service";
 import { TokenCollectorService } from "./lib/token-collector";
+import { createProviderRegistry } from "./lib/provider-registry";
 
 export async function buildServer(config: AppConfig = loadConfig()) {
   const app = Fastify({
     logger: true
   });
-  const codexService = new CodexDataService(config);
-  const collectorService = new TokenCollectorService(config, codexService);
+  const providerRegistry = createProviderRegistry(config);
+  const provider = providerRegistry.getActiveProvider();
+  const collectorService = new TokenCollectorService(config, provider);
 
   collectorService.ensureSchema();
-  codexService.ensureMonitorSchema();
+  provider.ensureMonitorSchema();
 
   await app.register(cors, {
     origin: true
@@ -25,11 +26,12 @@ export async function buildServer(config: AppConfig = loadConfig()) {
 
   app.get("/api/health", async () => ({
     ok: true,
-    timezone: config.timezone
+    timezone: config.timezone,
+    provider: config.activeProviderId
   }));
 
   app.get("/api/overview", async () => {
-    const overview = codexService.getOverview(collectorService.getOverviewTokens(7));
+    const overview = provider.getOverview(collectorService.getOverviewTokens(7));
     return overviewResponseSchema.parse({
       ...overview,
       collector: collectorService.getLastRun()
@@ -42,7 +44,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
       limit?: string;
     };
 
-    return codexService.listProjects({
+    return provider.listProjects({
       query: query.query,
       limit: query.limit ? Number(query.limit) : undefined
     });
@@ -58,7 +60,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
       limit?: string;
     };
 
-    return codexService.listSessions({
+    return provider.listSessions({
       query: query.query,
       projectId: query.projectId,
       includeSubagents: query.includeSubagents === "true",
@@ -70,7 +72,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
 
   app.get("/api/sessions/:id", async (request, reply) => {
     const params = request.params as { id: string };
-    const detail = codexService.getSessionDetail(params.id);
+    const detail = provider.getSessionDetail(params.id);
 
     if (!detail) {
       reply.code(404);
@@ -80,11 +82,11 @@ export async function buildServer(config: AppConfig = loadConfig()) {
     return detail;
   });
 
-  app.get("/api/memory", async () => codexService.getMemory());
-  app.get("/api/integrations", async () => codexService.getIntegrations());
+  app.get("/api/memory", async () => provider.getMemory());
+  app.get("/api/integrations", async () => provider.getIntegrations());
   app.get("/api/integrations/hooks/:id", async (request, reply) => {
     const params = request.params as { id: string };
-    const detail = codexService.getHookDetail(params.id);
+    const detail = provider.getHookDetail(params.id);
 
     if (!detail) {
       reply.code(404);
@@ -95,7 +97,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
   });
   app.get("/api/integrations/skills/:id", async (request, reply) => {
     const params = request.params as { id: string };
-    const detail = codexService.getSkillDetail(params.id);
+    const detail = provider.getSkillDetail(params.id);
 
     if (!detail) {
       reply.code(404);
@@ -105,14 +107,23 @@ export async function buildServer(config: AppConfig = loadConfig()) {
     return detail;
   });
   app.post("/api/integrations/refresh", async () => {
-    await codexService.refreshIntegrationsUsageInBackground();
-    return codexService.getIntegrations();
+    await provider.refreshIntegrationsUsageInBackground();
+    return provider.getIntegrations();
   });
 
   app.get("/api/tokens", async (request) => {
     const query = request.query as { range?: string };
     const rangeDays = Number(query.range ?? "7");
     return collectorService.getTokens(Number.isNaN(rangeDays) ? 7 : Math.max(1, rangeDays));
+  });
+
+  app.get("/api/tokens/project-usage", async (request) => {
+    const query = request.query as { unit?: string; anchor?: string };
+    const unit = query.unit === "week" || query.unit === "month"
+      ? query.unit
+      : "day";
+
+    return collectorService.getProjectTokenUsage(unit, query.anchor, new Date());
   });
 
   app.post("/api/tokens/snapshot", async () => {
@@ -137,7 +148,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
   }
 
   await collectorService.refreshUsageCacheInBackground(false, new Date());
-  await codexService.ensureFreshIntegrationsUsage();
+  await provider.ensureFreshIntegrationsUsage();
 
   return app;
 }

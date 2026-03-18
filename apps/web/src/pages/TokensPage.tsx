@@ -1,17 +1,23 @@
 import { useState } from "react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CalendarDays, Clock3, Flame, RefreshCw } from "lucide-react";
-import { apiResourceKeys, createSnapshot, getTokens } from "../api";
+import type { TokenPeriodUnit } from "@codex-monitor/shared";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw } from "lucide-react";
+import { apiResourceKeys, createSnapshot, getProjectTokenUsage, getTokens } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
+import { ModelUsageDonutChart } from "../components/ModelUsageDonutChart";
 import { Panel } from "../components/Panel";
+import { ProjectBubbleChart } from "../components/ProjectBubbleChart";
 import { StatStrip } from "../components/StatStrip";
 import { StatusPill } from "../components/StatusPill";
-import { TokenMetricToggle } from "../components/TokenMetricToggle";
 import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
-import { extendHourlyTokenMetric, readDailyInputMetric, readDailyTokenMetric, useTokenMetricMode } from "../hooks/useTokenMetricMode";
 import { formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
 
 const ranges = [7, 30, 90];
+const projectUnits: Array<{ value: TokenPeriodUnit; label: string }> = [
+  { value: "day", label: "일별" },
+  { value: "week", label: "주별" },
+  { value: "month", label: "월별" }
+];
 
 function formatChartValue(value: number | string | readonly (number | string)[] | undefined | null): string {
   if (value == null) {
@@ -25,19 +31,22 @@ function formatChartValue(value: number | string | readonly (number | string)[] 
 
 export function TokensPage() {
   const [range, setRange] = useState(7);
+  const [projectUnit, setProjectUnit] = useState<TokenPeriodUnit>("day");
+  const [projectAnchorDay, setProjectAnchorDay] = useState(() => formatLocalDayKey(new Date()));
   const [syncBusy, setSyncBusy] = useState(false);
-  const tokenMode = useTokenMetricMode();
   const tokens = useApiResource(() => getTokens(range), {
     deps: [range],
     cacheKey: apiResourceKeys.tokens(range),
     staleTimeMs: 5_000
   });
-  const hourlySeries = tokens.data?.hourly.map(extendHourlyTokenMetric) ?? [];
-  const dailySeries = tokens.data?.daily.map((entry) => ({
-    ...entry,
-    inputMetric: readDailyInputMetric(entry, tokenMode.mode),
-    outputMetric: entry.outputTokens
-  })) ?? [];
+  const projectUsage = useApiResource(() => getProjectTokenUsage(projectUnit, projectAnchorDay), {
+    deps: [projectUnit, projectAnchorDay],
+    cacheKey: apiResourceKeys.projectTokenUsage(projectUnit, projectAnchorDay),
+    staleTimeMs: 5_000
+  });
+  const hourlySeries = tokens.data?.hourly ?? [];
+  const trailingSevenDays = tokens.data?.daily.slice(-7) ?? [];
+  const activeProjectAnchorDay = projectUsage.data?.anchorDay ?? projectAnchorDay;
 
   async function handleSync() {
     try {
@@ -45,16 +54,30 @@ export function TokensPage() {
       await createSnapshot();
       invalidateApiResource(apiResourceKeys.overview);
       tokens.refresh();
+      projectUsage.refresh();
     } finally {
       setSyncBusy(false);
     }
+  }
+
+  function handleProjectUnitChange(nextUnit: TokenPeriodUnit) {
+    setProjectUnit(nextUnit);
+    setProjectAnchorDay(formatLocalDayKey(new Date()));
+  }
+
+  function handleProjectNavigate(direction: -1 | 1) {
+    if (direction > 0 && projectUsage.data?.isCurrentPeriod) {
+      return;
+    }
+
+    setProjectAnchorDay(shiftAnchorDay(activeProjectAnchorDay, projectUnit, direction));
   }
 
   return (
     <div className="page-stack">
       <section className="page-heading">
         <div>
-          <p className="eyebrow">TOKENS</p>
+          <p className="eyebrow">토큰</p>
           <h2>일별 사용량</h2>
         </div>
         <div className="inline-actions">
@@ -70,18 +93,6 @@ export function TokensPage() {
               <span>새로고침</span>
             </div>
           ) : null}
-          <div className="segmented">
-            {ranges.map((item) => (
-              <button
-                key={item}
-                className={item === range ? "segment active" : "segment"}
-                onClick={() => setRange(item)}
-              >
-                {item}일
-              </button>
-            ))}
-          </div>
-          <TokenMetricToggle mode={tokenMode.mode} onChange={tokenMode.setMode} />
           <button className="primary-button" disabled={syncBusy} onClick={handleSync}>
             <RefreshCw size={14} strokeWidth={2.2} />
             {syncBusy ? "동기화 중" : "지금 동기화"}
@@ -96,8 +107,8 @@ export function TokensPage() {
               items={[
                 {
                   label: "오늘 토큰",
-                  value: formatNumber(tokens.data.daily.at(-1) ? readDailyTokenMetric(tokens.data.daily.at(-1)!, tokenMode.mode) : 0),
-                  meta: tokenMode.label,
+                  value: formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0),
+                  meta: "총합",
                   accent: "cool",
                   icon: Flame
                 },
@@ -105,88 +116,132 @@ export function TokensPage() {
                   label: "7일 평균",
                   value: formatNumber(
                     Math.round(
-                      tokens.data.daily.reduce((sum, point) => sum + readDailyTokenMetric(point, tokenMode.mode), 0)
-                      / Math.max(tokens.data.daily.length, 1)
+                      trailingSevenDays.reduce((sum, point) => sum + point.totalTokens, 0)
+                      / Math.max(trailingSevenDays.length, 1)
                     )
                   ),
-                  meta: tokenMode.label,
+                  meta: "총합",
                   icon: CalendarDays
                 }
               ]}
             />
 
             <Panel
-              title="입력 / 출력"
-              subtitle={tokenMode.mode === "total" ? "좌측 입력 · 우측 출력 · 입력은 캐시 포함" : "좌측 입력 · 우측 출력 · 입력은 캐시 제외"}
+              title="일별 총 토큰"
+              subtitle={`${range}일`}
               icon={<Flame size={16} strokeWidth={2.2} />}
               actions={(
-                <div className="panel-badges">
+                <>
+                  <div className="segmented">
+                    {ranges.map((item) => (
+                      <button
+                        key={item}
+                        className={item === range ? "segment active" : "segment"}
+                        onClick={() => setRange(item)}
+                      >
+                        {item}일
+                      </button>
+                    ))}
+                  </div>
                   <span className="panel-badge">
                     <Clock3 size={13} strokeWidth={2.2} />
-                    입력 {formatNumber(dailySeries.at(-1)?.inputMetric ?? 0)}
+                    오늘 {formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0)}
                   </span>
-                  <span className="panel-badge muted-badge">
-                    출력 {formatNumber(dailySeries.at(-1)?.outputMetric ?? 0)}
-                  </span>
-                </div>
+                </>
               )}
             >
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height={340}>
-                  <LineChart data={dailySeries} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
+                  <BarChart data={tokens.data.daily} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barCategoryGap="24%">
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                     <XAxis dataKey="day" tickFormatter={formatDay} stroke="rgba(255,255,255,0.42)" axisLine={false} tickLine={false} />
                     <YAxis
-                      yAxisId="input"
                       width={104}
                       tickMargin={8}
                       allowDecimals={false}
                       tickFormatter={formatChartValue}
-                      stroke="var(--accent)"
-                      tick={{ fill: "var(--accent)" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      yAxisId="output"
-                      orientation="right"
-                      width={92}
-                      tickMargin={8}
-                      allowDecimals={false}
-                      tickFormatter={formatChartValue}
-                      stroke="var(--accent-warm)"
-                      tick={{ fill: "var(--accent-warm)" }}
+                      stroke="rgba(255,255,255,0.42)"
                       axisLine={false}
                       tickLine={false}
                     />
                     <Tooltip
                       cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                      formatter={(value, name) => [formatChartValue(value), String(name)]}
+                      formatter={(value) => [formatChartValue(value), "총 토큰"]}
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="inputMetric"
-                      yAxisId="input"
-                      name={tokenMode.mode === "total" ? "입력" : "입력 · 캐시 제외"}
-                      stroke="var(--accent)"
-                      strokeWidth={2.8}
-                      dot={false}
-                      activeDot={{ r: 4 }}
+                    <Bar
+                      dataKey="totalTokens"
+                      name="총 토큰"
+                      fill="var(--accent)"
+                      radius={[8, 8, 0, 0]}
+                      maxBarSize={44}
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="outputMetric"
-                      yAxisId="output"
-                      name="출력"
-                      stroke="var(--accent-warm)"
-                      strokeWidth={2.4}
-                      dot={false}
-                      activeDot={{ r: 4 }}
-                    />
-                  </LineChart>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </Panel>
+
+            <Panel
+              title="모델 사용 비율"
+              subtitle={`${range}일 토큰 기준`}
+              icon={<CalendarDays size={16} strokeWidth={2.2} />}
+              actions={(
+                <div className="panel-badges">
+                  <span className="panel-badge">
+                    <Flame size={13} strokeWidth={2.2} />
+                    총 {formatNumber(tokens.data.modelUsage.reduce((sum, item) => sum + item.totalTokens, 0))}
+                  </span>
+                  <span className="panel-badge muted-badge">
+                    모델 {formatNumber(tokens.data.modelUsage.length)}
+                  </span>
+                </div>
+              )}
+            >
+              <ModelUsageDonutChart data={tokens.data.modelUsage} />
+            </Panel>
+
+            <AsyncPane loading={projectUsage.initialLoading} error={projectUsage.error} hasData={projectUsage.hasData}>
+              {projectUsage.data ? (
+                <Panel
+                  title="프로젝트별 토큰 분포"
+                  subtitle={projectUsage.data.label}
+                  icon={<CalendarDays size={16} strokeWidth={2.2} />}
+                  actions={(
+                    <>
+                      <div className="segmented">
+                        {projectUnits.map((item) => (
+                          <button
+                            key={item.value}
+                            className={item.value === projectUnit ? "segment active" : "segment"}
+                            onClick={() => handleProjectUnitChange(item.value)}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="project-nav">
+                        <button className="ghost-button icon-button" onClick={() => handleProjectNavigate(-1)} aria-label="이전 기간">
+                          <ChevronLeft size={15} strokeWidth={2.2} />
+                        </button>
+                        <span className="panel-badge">{projectUsage.data.label}</span>
+                        <button
+                          className="ghost-button icon-button"
+                          onClick={() => handleProjectNavigate(1)}
+                          disabled={projectUsage.data.isCurrentPeriod}
+                          aria-label="다음 기간"
+                        >
+                          <ChevronRight size={15} strokeWidth={2.2} />
+                        </button>
+                        <span className="panel-badge muted-badge">
+                          총 {formatNumber(projectUsage.data.totalTokens)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                >
+                  <ProjectBubbleChart data={projectUsage.data.projects} />
+                </Panel>
+              ) : null}
+            </AsyncPane>
 
             <div className="fold-list">
               <details className="fold-panel">
@@ -200,7 +255,7 @@ export function TokensPage() {
                 <div className="fold-content">
                 <div className="chart-wrap compact">
                   <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={hourlySeries} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+                    <BarChart data={hourlySeries} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barCategoryGap="26%">
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                       <XAxis dataKey="hourBucket" tickFormatter={formatHour} stroke="rgba(255,255,255,0.4)" axisLine={false} tickLine={false} minTickGap={24} />
                       <YAxis
@@ -214,18 +269,16 @@ export function TokensPage() {
                       />
                       <Tooltip
                         cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                        formatter={(value, name) => [formatChartValue(value), String(name)]}
+                        formatter={(value) => [formatChartValue(value), "총 토큰"]}
                       />
-                      <Line
-                        type="monotone"
-                        dataKey={tokenMode.dataKey}
-                        name={tokenMode.label}
-                        stroke="var(--accent-soft)"
-                        strokeWidth={2.4}
-                        dot={false}
-                        activeDot={{ r: 3 }}
+                      <Bar
+                        dataKey="totalTokens"
+                        name="총 토큰"
+                        fill="var(--accent-soft)"
+                        radius={[6, 6, 0, 0]}
+                        maxBarSize={18}
                       />
-                    </LineChart>
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="snapshot-list compact">
@@ -233,9 +286,9 @@ export function TokensPage() {
                     <article key={entry.hourBucket} className="snapshot-row">
                       <div>
                         <strong>{formatDateTime(entry.hourBucket)}</strong>
-                        <p>{entry.requestCount} requests</p>
+                        <p>요청 {entry.requestCount}회</p>
                       </div>
-                      <span>{formatNumber(tokenMode.mode === "total" ? entry.totalTokens : entry.uncachedTokens)}</span>
+                      <span>{formatNumber(entry.totalTokens)}</span>
                     </article>
                     ))}
                   </div>
@@ -272,4 +325,35 @@ export function TokensPage() {
       </AsyncPane>
     </div>
   );
+}
+
+function formatLocalDayKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function parseLocalDayKey(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return new Date();
+  }
+
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function shiftAnchorDay(anchorDay: string, unit: TokenPeriodUnit, delta: -1 | 1): string {
+  const date = parseLocalDayKey(anchorDay);
+
+  if (unit === "week") {
+    return formatLocalDayKey(new Date(date.getFullYear(), date.getMonth(), date.getDate() + (7 * delta)));
+  }
+
+  if (unit === "month") {
+    return formatLocalDayKey(new Date(date.getFullYear(), date.getMonth() + delta, 1));
+  }
+
+  return formatLocalDayKey(new Date(date.getFullYear(), date.getMonth(), date.getDate() + delta));
 }

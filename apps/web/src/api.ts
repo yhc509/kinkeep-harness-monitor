@@ -3,10 +3,12 @@ import {
   integrationsResponseSchema,
   memoryResponseSchema,
   overviewResponseSchema,
+  projectTokenUsageResponseSchema,
   projectsResponseSchema,
   sessionDetailSchema,
   sessionListItemSchema,
   skillDetailSchema,
+  tokenPeriodUnitSchema,
   tokenSyncResultSchema,
   tokensResponseSchema
 } from "@codex-monitor/shared";
@@ -28,7 +30,8 @@ export const apiResourceKeys = {
   integrations: "integrations",
   hookDetail: (id: string) => `hook:${id}`,
   skillDetail: (id: string) => `skill:${id}`,
-  tokens: (rangeDays: number) => `tokens:${rangeDays}`
+  tokens: (rangeDays: number) => `tokens:${rangeDays}`,
+  projectTokenUsage: (unit: z.infer<typeof tokenPeriodUnitSchema>, anchorDay: string) => `project-token-usage:${unit}:${anchorDay}`
 } as const;
 
 async function requestJson<T>(input: string, schema: z.ZodSchema<T>, init?: RequestInit): Promise<T> {
@@ -100,6 +103,14 @@ export function getSkillDetail(id: string) {
 
 export function getTokens(rangeDays: number) {
   return requestJson(`/api/tokens?range=${rangeDays}`, tokensResponseSchema);
+}
+
+export function getProjectTokenUsage(unit: z.infer<typeof tokenPeriodUnitSchema>, anchorDay: string) {
+  const search = new URLSearchParams({
+    unit,
+    anchor: anchorDay
+  });
+  return requestJson(`/api/tokens/project-usage?${search.toString()}`, projectTokenUsageResponseSchema);
 }
 
 export function createSnapshot() {

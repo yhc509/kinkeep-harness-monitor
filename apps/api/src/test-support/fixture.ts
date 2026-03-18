@@ -37,6 +37,8 @@ export function createTestFixture(options: { stage1Mode?: "ready" | "empty" | "u
   fs.writeFileSync(path.join(worktreeProjectRoot, ".git"), "gitdir: /tmp/fake-linked-project.git", "utf8");
 
   fs.writeFileSync(path.join(codexHome, "config.toml"), `
+developer_instructions = "한국어 응답, 근본 원인 우선, 설명은 간결하게"
+personality = "friendly"
 notify = ["node", "/tmp/notify-hook.js"]
 
 [mcp_servers.openaiDeveloperDocs]
@@ -101,7 +103,41 @@ description: Review skill from agents
       payload: {
         type: "function_call",
         name: "mcp__openaiDeveloperDocs__search_openai_docs",
-        arguments: "{\"query\":\"codex\"}"
+        arguments: "{\"query\":\"codex\"}",
+        call_id: "call-mcp-1"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:03.500Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "spawn_agent",
+        arguments: "{\"agent_type\":\"explorer\",\"message\":\"탐색해줘\"}",
+        call_id: "call-spawn-1"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:03.700Z",
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-spawn-1",
+        output: "{\"agent_id\":\"agent-1\",\"nickname\":\"Noether\"}"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:03.900Z",
+      type: "turn_context",
+      payload: {
+        cwd: gitProjectClient,
+        model: "gpt-5.4",
+        collaboration_mode: {
+          mode: "default",
+          settings: {
+            model: "gpt-5.4"
+          }
+        }
       }
     },
     {
@@ -383,11 +419,19 @@ description: Review skill from agents
     host: "127.0.0.1",
     port: 4318,
     repoRoot: rootDir,
-    codexHome,
-    agentsHome,
     monitorDbPath: path.join(rootDir, "data", "monitor.sqlite"),
     webDistPath: path.join(rootDir, "apps", "web", "dist"),
-    timezone: "Asia/Seoul"
+    timezone: "Asia/Seoul",
+    activeProviderId: "codex",
+    providers: {
+      codex: {
+        codexHome,
+        agentsHome
+      },
+      claudeCode: {
+        home: path.join(rootDir, ".claude")
+      }
+    }
   };
 
   return {

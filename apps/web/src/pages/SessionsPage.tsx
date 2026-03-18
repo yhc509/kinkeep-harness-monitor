@@ -16,6 +16,7 @@ export function SessionsPage() {
   const navigate = useNavigate();
   const params = useParams<{ projectId?: string; sessionId?: string }>();
   const [search, setSearch] = useState("");
+  const [showActivity, setShowActivity] = useState(true);
   const [showTechnical, setShowTechnical] = useState(false);
   const [includeSubagents, setIncludeSubagents] = useState(false);
   const [showSubagentSummary, setShowSubagentSummary] = useState(false);
@@ -361,10 +362,16 @@ export function SessionsPage() {
         subtitle="사용자와 에이전트 대화"
         icon={<MessagesSquare size={16} strokeWidth={2.2} />}
         actions={(
-          <button className="ghost-button" onClick={() => setShowTechnical((prev) => !prev)}>
-            <SlidersHorizontal size={14} strokeWidth={2.2} />
-            {showTechnical ? "기술 로그 숨기기" : "기술 로그 보기"}
-          </button>
+          <div className="panel-badges">
+            <button className="ghost-button" onClick={() => setShowActivity((prev) => !prev)}>
+              <Bot size={14} strokeWidth={2.2} />
+              {showActivity ? "작업 이벤트 숨기기" : "작업 이벤트 보기"}
+            </button>
+            <button className="ghost-button" onClick={() => setShowTechnical((prev) => !prev)}>
+              <SlidersHorizontal size={14} strokeWidth={2.2} />
+              {showTechnical ? "기술 로그 숨기기" : "기술 로그 보기"}
+            </button>
+          </div>
         )}
       >
         <AsyncPane
@@ -456,7 +463,7 @@ export function SessionsPage() {
                 </div>
               ) : null}
 
-              <SessionTimeline items={detailData.timeline} showTechnical={showTechnical} />
+              <SessionTimeline items={detailData.timeline} showActivity={showActivity} showTechnical={showTechnical} />
             </div>
           ) : (
             <div className="state-box">세션 없음</div>

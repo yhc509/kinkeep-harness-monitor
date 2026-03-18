@@ -32,6 +32,8 @@ import {
 } from "@codex-monitor/shared";
 import type { AppConfig } from "../config";
 import { formatDayKey, formatHourBucket, fromEpochSeconds, humanizeEventName, stringifySnippet, toLocalDateTime } from "./format";
+import type { MonitorProviderAdapter, OverviewTokenSnapshot, ProjectQueryOptions, SessionQueryOptions } from "./provider-adapter";
+import { resolveProjectInfoFromCwd } from "./project-resolver";
 
 const INTEGRATIONS_STALE_MS = 5 * 60 * 1000;
 const MCP_USAGE_PARSE_VERSION = "1";
@@ -54,20 +56,6 @@ interface ThreadRow {
   memory_mode: string;
 }
 
-interface SessionQueryOptions {
-  query?: string;
-  projectId?: string;
-  includeSubagents?: boolean;
-  sort?: "updatedAt" | "tokensUsed" | "createdAt";
-  order?: "asc" | "desc";
-  limit?: number;
-}
-
-interface ProjectQueryOptions {
-  query?: string;
-  limit?: number;
-}
-
 interface TokenState {
   totalTokens: number;
   threadCount: number;
@@ -86,6 +74,8 @@ interface HookRecord {
 interface ParsedConfig {
   hooks: HookRecord[];
   mcpServers: Array<{ name: string; url: string | null }>;
+  developerInstructions: string | null;
+  personality: string | null;
 }
 
 interface SkillsCacheEntry {
@@ -113,13 +103,6 @@ interface SourceInfo {
   subagentDepth: number | null;
   subagentNickname: string | null;
   subagentRole: string | null;
-}
-
-interface OverviewTokenSnapshot {
-  todayTokens: TokenBreakdown;
-  daily: DailyTokenPoint[];
-  averageTokens7d: TokenBreakdown;
-  lastSyncedAt: string | null;
 }
 
 interface MonitorRolloutFileState {
@@ -150,14 +133,15 @@ interface McpUsageSyncPreparation {
   hasCache: boolean;
 }
 
-export class CodexDataService {
+export class CodexDataService implements MonitorProviderAdapter {
+  readonly id = "codex" as const;
   private skillsCache: SkillsCacheEntry | null = null;
   private readonly projectInfoCache = new Map<string, ProjectInfo>();
   private readonly stateDbPath: string;
   private integrationsRefreshPromise: Promise<void> | null = null;
 
   constructor(private readonly config: AppConfig) {
-    this.stateDbPath = resolveLatestSqlite(config.codexHome, /^state_\d+\.sqlite$/);
+    this.stateDbPath = resolveLatestSqlite(config.providers.codex.codexHome, /^state_\d+\.sqlite$/);
   }
 
   ensureMonitorSchema(): void {
@@ -208,6 +192,7 @@ export class CodexDataService {
         todayTokens: tokens.todayTokens
       },
       daily: tokens.daily,
+      heatmapDaily: tokens.heatmapDaily,
       averageTokens7d: tokens.averageTokens7d,
       lastSyncedAt: tokens.lastSyncedAt,
       collector: null
@@ -371,6 +356,7 @@ export class CodexDataService {
 
   getMemory(): MemoryResponse {
     const database = this.openStateDb();
+    const configData = this.readConfigToml();
     const modeRows = database.prepare(`
       SELECT memory_mode AS mode, COUNT(*) AS count
       FROM threads
@@ -435,7 +421,9 @@ export class CodexDataService {
       totalThreads: totalThreads.count,
       hasStage1OutputsTable,
       stage1OutputCount,
-      sourceStatus
+      sourceStatus,
+      developerInstructions: configData.developerInstructions,
+      personality: configData.personality
     });
   }
 
@@ -630,8 +618,8 @@ export class CodexDataService {
     }
 
     const value = [
-      ...scanSkills(path.join(this.config.codexHome, "skills"), "codex"),
-      ...scanSkills(path.join(this.config.agentsHome, "skills"), "agents")
+      ...scanSkills(path.join(this.config.providers.codex.codexHome, "skills"), "codex"),
+      ...scanSkills(path.join(this.config.providers.codex.agentsHome, "skills"), "agents")
     ].sort((left, right) => left.name.localeCompare(right.name));
 
     this.skillsCache = {
@@ -674,7 +662,24 @@ export class CodexDataService {
   }
 
   getSessionRoot(): string {
-    return path.join(this.config.codexHome, "sessions");
+    return path.join(this.config.providers.codex.codexHome, "sessions");
+  }
+
+  resolveProjectInfoForRolloutPath(rolloutPath: string): ProjectInfo | null {
+    const database = this.openStateDb();
+    const row = database.prepare(`
+      SELECT cwd
+      FROM threads
+      WHERE rollout_path = ?
+      LIMIT 1
+    `).get(rolloutPath) as { cwd: string } | undefined;
+    database.close();
+
+    if (!row?.cwd) {
+      return null;
+    }
+
+    return this.resolveProjectInfo(row.cwd);
   }
 
   private readIndexedMcpUsage(): Map<string, { usageCount: number; toolNames: Set<string> }> {
@@ -790,13 +795,7 @@ export class CodexDataService {
       return cached;
     }
 
-    const projectPath = findProjectPath(resolvedCwd);
-    const info = {
-      projectId: Buffer.from(projectPath).toString("base64url"),
-      projectName: path.basename(projectPath) || projectPath,
-      projectPath
-    };
-
+    const info = resolveProjectInfoFromCwd(resolvedCwd);
     this.projectInfoCache.set(resolvedCwd, info);
     return info;
   }
@@ -827,14 +826,25 @@ export class CodexDataService {
   }
 
   private readConfigToml(): ParsedConfig {
-    const filePath = path.join(this.config.codexHome, "config.toml");
+    const filePath = path.join(this.config.providers.codex.codexHome, "config.toml");
     if (!fs.existsSync(filePath)) {
-      return { hooks: [], mcpServers: [] };
+      return {
+        hooks: [],
+        mcpServers: [],
+        developerInstructions: null,
+        personality: null
+      };
     }
 
     const parsed = parseToml(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
     const hooks: HookRecord[] = [];
     const mcpServers: ParsedConfig["mcpServers"] = [];
+    const developerInstructions = typeof parsed.developer_instructions === "string"
+      ? parsed.developer_instructions.trim() || null
+      : null;
+    const personality = typeof parsed.personality === "string"
+      ? parsed.personality.trim() || null
+      : null;
 
     const notify = parsed.notify;
     if (Array.isArray(notify)) {
@@ -877,7 +887,7 @@ export class CodexDataService {
       }
     }
 
-    return { hooks, mcpServers };
+    return { hooks, mcpServers, developerInstructions, personality };
   }
 
   private openStateDb(): DatabaseSync {
@@ -925,23 +935,6 @@ function mapThreadRow(row: ThreadRow, project: ProjectInfo, sourceInfo: SourceIn
     agentNickname: sourceInfo.subagentNickname,
     agentRole: sourceInfo.subagentRole
   };
-}
-
-function findProjectPath(cwd: string): string {
-  let current = cwd;
-
-  while (true) {
-    if (fs.existsSync(path.join(current, ".git"))) {
-      return current;
-    }
-
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return cwd;
-    }
-
-    current = parent;
-  }
 }
 
 function parseSourceInfo(value: string, fallbackNickname: string | null, fallbackRole: string | null): SourceInfo {
@@ -998,6 +991,7 @@ function parseRolloutTimeline(rolloutPath: string): { timeline: SessionTimelineI
 
   const timeline: SessionTimelineItem[] = [];
   const tokenSeries: TokenSeriesPoint[] = [];
+  const toolCallById = new Map<string, { name: string | null }>();
   const lines = fs.readFileSync(rolloutPath, "utf8")
     .split("\n")
     .map((line) => line.trim())
@@ -1062,6 +1056,12 @@ function parseRolloutTimeline(rolloutPath: string): { timeline: SessionTimelineI
       }
 
       if (itemType === "function_call") {
+        const toolName = typeof payload.name === "string" ? payload.name : null;
+        const callId = typeof payload.call_id === "string" ? payload.call_id : null;
+        if (callId) {
+          toolCallById.set(callId, { name: toolName });
+        }
+
         timeline.push({
           id,
           timestamp,
@@ -1069,22 +1069,29 @@ function parseRolloutTimeline(rolloutPath: string): { timeline: SessionTimelineI
           role: "assistant",
           title: `Tool call: ${String(payload.name ?? "unknown")}`,
           body: stringifySnippet(payload.arguments ?? ""),
-          toolName: typeof payload.name === "string" ? payload.name : null,
-          metadata: {}
+          toolName,
+          metadata: callId ? { callId } : {}
         });
         return;
       }
 
       if (itemType === "function_call_output") {
+        const callId = typeof payload.call_id === "string" ? payload.call_id : null;
+        const toolName = callId
+          ? toolCallById.get(callId)?.name ?? null
+          : typeof payload.name === "string"
+            ? payload.name
+            : null;
+
         timeline.push({
           id,
           timestamp,
           kind: "tool_result",
           role: "tool",
-          title: "Tool output",
+          title: toolName ? `Tool output: ${toolName}` : "Tool output",
           body: extractToolOutput(payload),
-          toolName: typeof payload.name === "string" ? payload.name : null,
-          metadata: {}
+          toolName,
+          metadata: callId ? { callId } : {}
         });
         return;
       }

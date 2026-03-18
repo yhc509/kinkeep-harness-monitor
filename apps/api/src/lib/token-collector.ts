@@ -5,19 +5,31 @@ import type {
   CollectorRun,
   DailyTokenPoint,
   HourlyTokenUsage,
+  ModelTokenUsageItem,
+  ProjectTokenUsageItem,
+  ProjectTokenUsageResponse,
   TokenBreakdown,
+  TokenPeriodUnit,
   TokenSyncResult,
   TokenSyncStats,
   TokensResponse
 } from "@codex-monitor/shared";
-import { tokenSyncResultSchema, tokensResponseSchema } from "@codex-monitor/shared";
+import { projectTokenUsageResponseSchema, tokenSyncResultSchema, tokensResponseSchema } from "@codex-monitor/shared";
 import type { AppConfig } from "../config";
 import { formatDayKey, formatHourBucket, startOfLocalDay, startOfLocalHour, toLocalDateTime } from "./format";
-import type { CodexDataService } from "./codex-service";
+import type { SessionLogProvider } from "./provider-adapter";
+import type { ResolvedProjectInfo } from "./project-resolver";
+import { resolveProjectInfoFromCwd } from "./project-resolver";
 
-const CACHE_PARSE_VERSION = "2";
+const CACHE_PARSE_VERSION = "4";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
+const PROJECT_USAGE_LIMIT = 12;
+const MODEL_USAGE_LIMIT = 6;
+const UNKNOWN_PROJECT_ID = "__unknown__";
+const OTHER_PROJECT_ID = "__other__";
+const OTHER_MODEL_NAME = "기타";
+const UNKNOWN_MODEL_NAME = "모델 미상";
 
 export interface SnapshotResult extends TokenSyncResult {}
 
@@ -77,7 +89,9 @@ interface UsageAccumulator {
 }
 
 interface ParsedRolloutUsage {
+  project: ResolvedProjectInfo | null;
   hourlyUsage: Map<string, UsageAccumulator>;
+  hourlyModelUsage: Map<string, ModelUsageAccumulator>;
   tokenEvents: number;
 }
 
@@ -99,12 +113,34 @@ interface DailyUsageRow {
   output_tokens: number;
 }
 
+interface ProjectUsageRow {
+  project_id: string;
+  project_name: string;
+  project_path: string;
+  total_tokens: number;
+  request_count: number;
+}
+
+interface ModelUsageAccumulator {
+  hourBucket: string;
+  modelName: string;
+  modelProvider: string | null;
+  totalTokens: number;
+  requestCount: number;
+}
+
+interface ModelUsageRow {
+  model_name: string;
+  model_provider: string | null;
+  total_tokens: number;
+}
+
 export class TokenCollectorService {
   private usageRefreshPromise: Promise<SnapshotResult> | null = null;
 
   constructor(
     private readonly config: AppConfig,
-    private readonly codexService: CodexDataService
+    private readonly sessionLogProvider: SessionLogProvider
   ) {}
 
   ensureSchema(): void {
@@ -124,6 +160,9 @@ export class TokenCollectorService {
       CREATE TABLE IF NOT EXISTS rollout_hourly_usage (
         rollout_path TEXT NOT NULL,
         hour_bucket TEXT NOT NULL,
+        project_id TEXT NOT NULL DEFAULT '',
+        project_name TEXT NOT NULL DEFAULT '',
+        project_path TEXT NOT NULL DEFAULT '',
         total_tokens INTEGER NOT NULL,
         input_tokens INTEGER NOT NULL,
         cached_input_tokens INTEGER NOT NULL,
@@ -131,6 +170,16 @@ export class TokenCollectorService {
         reasoning_output_tokens INTEGER NOT NULL,
         request_count INTEGER NOT NULL,
         PRIMARY KEY (rollout_path, hour_bucket)
+      );
+
+      CREATE TABLE IF NOT EXISTS rollout_hourly_model_usage (
+        rollout_path TEXT NOT NULL,
+        hour_bucket TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        model_provider TEXT NOT NULL DEFAULT '',
+        total_tokens INTEGER NOT NULL,
+        request_count INTEGER NOT NULL,
+        PRIMARY KEY (rollout_path, hour_bucket, model_name, model_provider)
       );
 
       CREATE TABLE IF NOT EXISTS rollout_index_state (
@@ -151,6 +200,9 @@ export class TokenCollectorService {
         FOREIGN KEY(snapshot_id) REFERENCES hourly_token_snapshots(id)
       );
     `);
+    ensureColumn(database, "rollout_hourly_usage", "project_id", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_hourly_usage", "project_name", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_hourly_usage", "project_path", "TEXT NOT NULL DEFAULT ''");
     database.close();
   }
 
@@ -250,6 +302,17 @@ export class TokenCollectorService {
       LIMIT 20
     `).all() as unknown as CollectorRunRow[];
 
+    const modelRows = database.prepare(`
+      SELECT
+        model_name,
+        model_provider,
+        SUM(total_tokens) AS total_tokens
+      FROM rollout_hourly_model_usage
+      WHERE hour_bucket >= ?
+      GROUP BY model_name, model_provider
+      ORDER BY total_tokens DESC, model_name ASC
+    `).all(formatHourBucket(startDate)) as unknown as ModelUsageRow[];
+
     const lastSyncedRow = database.prepare(`
       SELECT finished_at
       FROM collector_runs
@@ -284,12 +347,14 @@ export class TokenCollectorService {
     const currentHourTokens = currentHour
       ? createTokenBreakdown(currentHour.totalTokens, currentHour.cachedInputTokens)
       : emptyTokenBreakdown();
+    const modelUsage = summarizeModelUsage(modelRows.map(mapModelUsageRow));
 
     return tokensResponseSchema.parse({
       rangeDays,
       currentHourTokens,
       daily,
       hourly,
+      modelUsage,
       collectorRuns: runRows.map(mapCollectorRunRow),
       lastSyncedAt: lastSyncedRow?.finished_at ?? null
     });
@@ -298,23 +363,85 @@ export class TokenCollectorService {
   getOverviewTokens(rangeDays: number, now = new Date()): {
     todayTokens: TokenBreakdown;
     daily: DailyTokenPoint[];
+    heatmapDaily: DailyTokenPoint[];
     averageTokens7d: TokenBreakdown;
     lastSyncedAt: string | null;
   } {
-    const tokens = this.getTokens(rangeDays, now);
+    const tokens = this.getTokens(Math.max(rangeDays, 365), now);
+    const daily = tokens.daily.slice(-rangeDays);
     const averageTokens7d = createTokenBreakdown(
-      Math.round(tokens.daily.reduce((sum, point) => sum + point.totalTokens, 0) / Math.max(tokens.daily.length, 1)),
-      Math.round(tokens.daily.reduce((sum, point) => sum + point.cachedInputTokens, 0) / Math.max(tokens.daily.length, 1))
+      Math.round(daily.reduce((sum, point) => sum + point.totalTokens, 0) / Math.max(daily.length, 1)),
+      Math.round(daily.reduce((sum, point) => sum + point.cachedInputTokens, 0) / Math.max(daily.length, 1))
     );
 
     return {
-      todayTokens: tokens.daily.at(-1)
-        ? createTokenBreakdown(tokens.daily.at(-1)!.totalTokens, tokens.daily.at(-1)!.cachedInputTokens)
+      todayTokens: daily.at(-1)
+        ? createTokenBreakdown(daily.at(-1)!.totalTokens, daily.at(-1)!.cachedInputTokens)
         : emptyTokenBreakdown(),
-      daily: tokens.daily,
+      daily,
+      heatmapDaily: tokens.daily,
       averageTokens7d,
       lastSyncedAt: tokens.lastSyncedAt
     };
+  }
+
+  getProjectTokenUsage(
+    unit: TokenPeriodUnit,
+    anchorDay: string | undefined,
+    now = new Date()
+  ): ProjectTokenUsageResponse {
+    this.ensureSchema();
+    if (this.isRefreshNeeded(now)) {
+      void this.refreshUsageCacheInBackground(false, now);
+    }
+
+    const normalizedNow = normalizePeriodStart(now, unit);
+    const anchorDate = normalizePeriodStart(parseDayKey(anchorDay, now), unit);
+    const nextStart = addPeriod(anchorDate, unit, 1);
+    const periodEndDate = new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate() - 1);
+    const database = this.openMonitorDb();
+    const rows = database.prepare(`
+      SELECT
+        project_id,
+        project_name,
+        project_path,
+        SUM(total_tokens) AS total_tokens,
+        SUM(request_count) AS request_count
+      FROM rollout_hourly_usage
+      WHERE hour_bucket >= ?
+        AND hour_bucket < ?
+      GROUP BY project_id, project_name, project_path
+      ORDER BY total_tokens DESC, project_name ASC
+    `).all(
+      formatHourBucket(anchorDate),
+      formatHourBucket(nextStart)
+    ) as unknown as ProjectUsageRow[];
+    database.close();
+
+    const projects = rows.map(mapProjectUsageRow);
+    const visibleProjects = projects.slice(0, PROJECT_USAGE_LIMIT);
+    const hiddenProjects = projects.slice(PROJECT_USAGE_LIMIT);
+
+    if (hiddenProjects.length > 0) {
+      visibleProjects.push({
+        projectId: OTHER_PROJECT_ID,
+        projectName: "기타",
+        projectPath: "",
+        totalTokens: hiddenProjects.reduce((sum, item) => sum + item.totalTokens, 0),
+        requestCount: hiddenProjects.reduce((sum, item) => sum + item.requestCount, 0)
+      });
+    }
+
+    return projectTokenUsageResponseSchema.parse({
+      unit,
+      anchorDay: formatDayKey(anchorDate),
+      periodStart: formatDayKey(anchorDate),
+      periodEnd: formatDayKey(periodEndDate),
+      label: formatPeriodLabel(anchorDate, unit, periodEndDate),
+      isCurrentPeriod: anchorDate.getTime() === normalizedNow.getTime(),
+      totalTokens: visibleProjects.reduce((sum, item) => sum + item.totalTokens, 0),
+      projects: visibleProjects
+    });
   }
 
   private isRefreshNeeded(now: Date): boolean {
@@ -332,7 +459,7 @@ export class TokenCollectorService {
   }
 
   private prepareSyncState(): SyncPreparation {
-    const files = scanRolloutFiles(this.codexService.getSessionRoot());
+    const files = scanRolloutFiles(this.sessionLogProvider.getSessionRoot());
     const database = this.openMonitorDb();
     const indexedRows = database.prepare(`
       SELECT
@@ -346,6 +473,10 @@ export class TokenCollectorService {
     const usageCount = database.prepare(`
       SELECT COUNT(*) AS count
       FROM rollout_hourly_usage
+    `).get() as { count: number };
+    const modelUsageCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_hourly_model_usage
     `).get() as { count: number };
     database.close();
 
@@ -374,7 +505,7 @@ export class TokenCollectorService {
       totalRollouts: files.length,
       changedFiles,
       deletedPaths,
-      hasCache: usageCount.count > 0 || indexedRows.length > 0
+      hasCache: usageCount.count > 0 || modelUsageCount.count > 0 || indexedRows.length > 0
     };
   }
 
@@ -395,36 +526,66 @@ export class TokenCollectorService {
 
       for (const rolloutPath of preparation.deletedPaths) {
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(rolloutPath);
+        database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(rolloutPath);
         database.prepare(`DELETE FROM rollout_index_state WHERE rollout_path = ?`).run(rolloutPath);
       }
 
       for (const file of preparation.changedFiles) {
-        const parsed = parseRolloutUsage(file.rolloutPath);
+        const parsed = parseRolloutUsage(file.rolloutPath, this.sessionLogProvider);
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(file.rolloutPath);
+        database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(file.rolloutPath);
 
         const insertUsage = database.prepare(`
           INSERT INTO rollout_hourly_usage (
             rollout_path,
             hour_bucket,
+            project_id,
+            project_name,
+            project_path,
             total_tokens,
             input_tokens,
             cached_input_tokens,
             output_tokens,
             reasoning_output_tokens,
             request_count
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
+        const insertModelUsage = database.prepare(`
+          INSERT INTO rollout_hourly_model_usage (
+            rollout_path,
+            hour_bucket,
+            model_name,
+            model_provider,
+            total_tokens,
+            request_count
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const project = parsed.project ?? createUnknownProjectInfo();
 
         for (const [hourBucket, usage] of parsed.hourlyUsage.entries()) {
           insertUsage.run(
             file.rolloutPath,
             hourBucket,
+            project.projectId,
+            project.projectName,
+            project.projectPath,
             usage.totalTokens,
             usage.inputTokens,
             usage.cachedInputTokens,
             usage.outputTokens,
             usage.reasoningOutputTokens,
             usage.requestCount
+          );
+        }
+
+        for (const modelUsage of parsed.hourlyModelUsage.values()) {
+          insertModelUsage.run(
+            file.rolloutPath,
+            modelUsage.hourBucket,
+            modelUsage.modelName,
+            modelUsage.modelProvider ?? "",
+            modelUsage.totalTokens,
+            modelUsage.requestCount
           );
         }
 
@@ -540,10 +701,14 @@ function buildRunMessage(preparation: SyncPreparation, stats: TokenSyncStats): s
   ].join(" · ");
 }
 
-function parseRolloutUsage(rolloutPath: string): ParsedRolloutUsage {
+function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogProvider): ParsedRolloutUsage {
   const text = fs.readFileSync(rolloutPath, "utf8");
   const lines = text.split("\n");
   const hourlyUsage = new Map<string, UsageAccumulator>();
+  const hourlyModelUsage = new Map<string, ModelUsageAccumulator>();
+  let project: ResolvedProjectInfo | null = sessionLogProvider.resolveProjectInfoForRolloutPath(rolloutPath);
+  let currentModelProvider: string | null = null;
+  let currentModelName: string | null = null;
   let tokenEvents = 0;
   let previousTotals: ParsedUsageBlock = emptyParsedUsage();
 
@@ -565,11 +730,34 @@ function parseRolloutUsage(rolloutPath: string): ParsedRolloutUsage {
       throw new Error(`rollout 파싱 실패: ${rolloutPath}\n${error instanceof Error ? error.message : "알 수 없는 오류"}`);
     }
 
+    const payload = parsed.payload ?? {};
+    if (parsed.type === "session_meta") {
+      if (typeof payload.cwd === "string" && payload.cwd.trim()) {
+        project = resolveProjectInfoFromCwd(payload.cwd.trim());
+      }
+
+      if (typeof payload.model_provider === "string" && payload.model_provider.trim()) {
+        currentModelProvider = payload.model_provider.trim();
+      }
+      continue;
+    }
+
+    if (parsed.type === "turn_context") {
+      if (typeof payload.cwd === "string" && payload.cwd.trim()) {
+        project = resolveProjectInfoFromCwd(payload.cwd.trim());
+      }
+
+      const nextModelName = readTurnContextModelName(payload);
+      if (nextModelName) {
+        currentModelName = nextModelName;
+      }
+      continue;
+    }
+
     if (parsed.type !== "event_msg") {
       continue;
     }
 
-    const payload = parsed.payload ?? {};
     if (payload.type !== "token_count") {
       continue;
     }
@@ -611,10 +799,19 @@ function parseRolloutUsage(rolloutPath: string): ParsedRolloutUsage {
     accumulator.reasoningOutputTokens += delta.reasoningOutputTokens;
     accumulator.requestCount += 1;
     hourlyUsage.set(hourBucket, accumulator);
+
+    const modelUsageKey = createModelUsageKey(hourBucket, currentModelName, currentModelProvider);
+    const modelUsage = hourlyModelUsage.get(modelUsageKey)
+      ?? createEmptyModelUsageAccumulator(hourBucket, currentModelName, currentModelProvider);
+    modelUsage.totalTokens += delta.totalTokens;
+    modelUsage.requestCount += 1;
+    hourlyModelUsage.set(modelUsageKey, modelUsage);
   }
 
   return {
+    project,
     hourlyUsage,
+    hourlyModelUsage,
     tokenEvents
   };
 }
@@ -677,6 +874,20 @@ function createEmptyUsageAccumulator(): UsageAccumulator {
   };
 }
 
+function createEmptyModelUsageAccumulator(
+  hourBucket: string,
+  modelName: string | null,
+  modelProvider: string | null
+): ModelUsageAccumulator {
+  return {
+    hourBucket,
+    modelName: modelName?.trim() || UNKNOWN_MODEL_NAME,
+    modelProvider: normalizeProvider(modelProvider),
+    totalTokens: 0,
+    requestCount: 0
+  };
+}
+
 function emptyParsedUsage(): ParsedUsageBlock {
   return {
     totalTokens: null,
@@ -697,6 +908,39 @@ function mapHourlyUsageRow(row: HourlyUsageRow): HourlyTokenUsage {
     reasoningOutputTokens: row.reasoning_output_tokens,
     requestCount: row.request_count
   };
+}
+
+function mapProjectUsageRow(row: ProjectUsageRow): ProjectTokenUsageItem {
+  return {
+    projectId: row.project_id || UNKNOWN_PROJECT_ID,
+    projectName: row.project_name || "알 수 없음",
+    projectPath: row.project_path,
+    totalTokens: row.total_tokens,
+    requestCount: row.request_count
+  };
+}
+
+function mapModelUsageRow(row: ModelUsageRow): ModelTokenUsageItem {
+  return {
+    modelName: row.model_name || UNKNOWN_MODEL_NAME,
+    modelProvider: normalizeProvider(row.model_provider),
+    totalTokens: row.total_tokens
+  };
+}
+
+function summarizeModelUsage(items: ModelTokenUsageItem[]): ModelTokenUsageItem[] {
+  const visibleItems = items.slice(0, MODEL_USAGE_LIMIT);
+  const hiddenItems = items.slice(MODEL_USAGE_LIMIT);
+
+  if (hiddenItems.length > 0) {
+    visibleItems.push({
+      modelName: OTHER_MODEL_NAME,
+      modelProvider: null,
+      totalTokens: hiddenItems.reduce((sum, item) => sum + item.totalTokens, 0)
+    });
+  }
+
+  return visibleItems;
 }
 
 function createTokenBreakdown(totalTokens: number, cachedInputTokens: number): TokenBreakdown {
@@ -734,6 +978,112 @@ function mapCollectorRunRow(row: CollectorRunRow): CollectorRun {
   };
 }
 
+function createUnknownProjectInfo(): ResolvedProjectInfo {
+  return {
+    projectId: UNKNOWN_PROJECT_ID,
+    projectName: "알 수 없음",
+    projectPath: ""
+  };
+}
+
+function readTurnContextModelName(payload: Record<string, unknown>): string | null {
+  const directModel = readOptionalString(payload, "model");
+  if (directModel) {
+    return directModel;
+  }
+
+  const collaborationMode = isRecord(payload.collaboration_mode) ? payload.collaboration_mode : null;
+  const settings = collaborationMode && isRecord(collaborationMode.settings) ? collaborationMode.settings : null;
+  return readOptionalString(settings ?? {}, "model");
+}
+
+function normalizeProvider(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function createModelUsageKey(hourBucket: string, modelName: string | null, modelProvider: string | null): string {
+  return `${hourBucket}\u0000${modelName?.trim() || UNKNOWN_MODEL_NAME}\u0000${normalizeProvider(modelProvider) ?? ""}`;
+}
+
+function parseDayKey(value: string | undefined, fallback: Date): Date {
+  if (!value) {
+    return startOfLocalDay(fallback);
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return startOfLocalDay(fallback);
+  }
+
+  const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(parsed.getTime()) ? startOfLocalDay(fallback) : startOfLocalDay(parsed);
+}
+
+function normalizePeriodStart(date: Date, unit: TokenPeriodUnit): Date {
+  const day = startOfLocalDay(date);
+  if (unit === "week") {
+    return startOfLocalWeek(day);
+  }
+
+  if (unit === "month") {
+    return new Date(day.getFullYear(), day.getMonth(), 1);
+  }
+
+  return day;
+}
+
+function startOfLocalWeek(date: Date): Date {
+  const day = startOfLocalDay(date);
+  const diff = (day.getDay() + 6) % 7;
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate() - diff);
+}
+
+function addPeriod(date: Date, unit: TokenPeriodUnit, delta: number): Date {
+  if (unit === "week") {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + (7 * delta));
+  }
+
+  if (unit === "month") {
+    return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+  }
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + delta);
+}
+
+function formatPeriodLabel(startDate: Date, unit: TokenPeriodUnit, endDate: Date): string {
+  if (unit === "month") {
+    return new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric",
+      month: "long"
+    }).format(startDate);
+  }
+
+  const dayFormatter = new Intl.DateTimeFormat("ko-KR", {
+    month: "long",
+    day: "numeric"
+  });
+
+  if (unit === "day") {
+    return dayFormatter.format(startDate);
+  }
+
+  return `${dayFormatter.format(startDate)} - ${dayFormatter.format(endDate)}`;
+}
+
+function ensureColumn(database: DatabaseSync, tableName: string, columnName: string, definition: string): void {
+  const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === columnName)) {
+    return;
+  }
+
+  database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+}
+
 function readOptionalNumber(record: Record<string, unknown>, key: string): number | null {
   if (!Object.hasOwn(record, key)) {
     return null;
@@ -750,6 +1100,20 @@ function readOptionalNumber(record: Record<string, unknown>, key: string): numbe
   }
 
   return null;
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string): string | null {
+  if (!Object.hasOwn(record, key)) {
+    return null;
+  }
+
+  const value = record[key];
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

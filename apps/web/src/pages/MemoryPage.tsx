@@ -1,5 +1,5 @@
 import type { MemoryResponse } from "@codex-monitor/shared";
-import { BookMarked, Brain, Clock3 } from "lucide-react";
+import { BookMarked, Brain, Clock3, UserRound } from "lucide-react";
 import { apiResourceKeys, getMemory } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
 import { Panel } from "../components/Panel";
@@ -12,78 +12,114 @@ export function MemoryPage() {
     cacheKey: apiResourceKeys.memory,
     staleTimeMs: 15_000
   });
+  const hasEntries = (memory.data?.entries.length ?? 0) > 0;
 
   return (
     <div className="page-stack">
-      <section className="page-heading">
+      <section className="page-heading memory-heading">
         <div>
-          <p className="eyebrow">MEMORY</p>
-          <h2>추출 메모리</h2>
+          <p className="eyebrow">메모리</p>
+          <h2>개인 선호</h2>
+          <p className="heading-subtle">Codex 설정 기준</p>
         </div>
-        {memory.data ? (
+        {memory.data?.personality ? (
           <div className="page-chip-group">
             <div className="page-chip">
-              <Brain size={14} strokeWidth={2.2} />
-              <span>{formatNumber(memory.data.entries.length)} entries</span>
-            </div>
-            <div className="page-chip">
-              <BookMarked size={14} strokeWidth={2.2} />
-              <span>{formatNumber(memory.data.modeCounts.length)} modes</span>
-            </div>
-            <div className="page-chip">
-              <Clock3 size={14} strokeWidth={2.2} />
-              <span>{getMemoryStateTitle(memory.data.sourceStatus)}</span>
+              <UserRound size={14} strokeWidth={2.2} />
+              <span>{memory.data.personality}</span>
             </div>
           </div>
         ) : null}
       </section>
 
       <Panel
-        title="Memory State"
-        subtitle="stage1 summary"
+        title="개인 선호"
+        subtitle="developer_instructions"
         icon={<Brain size={16} strokeWidth={2.2} />}
-        actions={memory.data ? (
-          <div className="panel-badges">
-            {memory.data.modeCounts.map((item) => (
-              <span key={item.mode} className="panel-badge muted-badge">
-                {item.mode} {formatNumber(item.count)}
-              </span>
-            ))}
-          </div>
-        ) : null}
       >
         <AsyncPane loading={memory.initialLoading} error={memory.error} hasData={memory.hasData}>
           {memory.data ? (
-            <>
-              {memory.data.entries.length === 0 ? (
-                <div className="state-box">
-                  <strong>{getMemoryStateTitle(memory.data.sourceStatus)}</strong>
-                  <p className="state-copy">{getMemoryStateMeta(memory.data)}</p>
+            <div className="memory-layout">
+              <section className="preference-card">
+                <div className="preference-card-header">
+                  <div>
+                    <p className="eyebrow">PREFERENCE</p>
+                    <h3>개인 선호</h3>
+                  </div>
+                  {memory.data.personality ? (
+                    <span className="panel-badge">{memory.data.personality}</span>
+                  ) : null}
                 </div>
+                <pre className="preference-body">{memory.data.developerInstructions || "설정 없음"}</pre>
+              </section>
+
+              <aside className="memory-status-card">
+                <div className="memory-status-row">
+                  <span>세션 메모리</span>
+                  <strong>{getSessionMemoryLabel(memory.data)}</strong>
+                </div>
+                <div className="memory-status-row">
+                  <span>추출 기록</span>
+                  <strong>{formatNumber(memory.data.stage1OutputCount)}</strong>
+                </div>
+                <div className="memory-status-row">
+                  <span>threads</span>
+                  <strong>{formatNumber(memory.data.totalThreads)}</strong>
+                </div>
+              </aside>
+
+              {hasEntries ? (
+                <section className="memory-section">
+                  <div className="memory-section-header">
+                    <div>
+                      <p className="eyebrow">SESSION MEMORY</p>
+                      <h3>추출 기록</h3>
+                    </div>
+                    <div className="page-chip-group">
+                      <div className="page-chip">
+                        <BookMarked size={14} strokeWidth={2.2} />
+                        <span>{formatNumber(memory.data.entries.length)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="memory-list">
+                    {memory.data.entries.map((entry) => (
+                      <article key={entry.threadId} className="memory-card">
+                        <header>
+                          <div>
+                            <h3>{entry.title}</h3>
+                            <p>{entry.threadId}</p>
+                          </div>
+                          <div className="memory-meta">
+                            <span><Clock3 size={13} />{formatDateTime(entry.generatedAt)}</span>
+                            <span><BookMarked size={13} />{entry.usageCount ?? 0}</span>
+                          </div>
+                        </header>
+                        <p className="memory-summary">{entry.rolloutSummary || "요약 없음"}</p>
+                        <details className="inline-disclosure">
+                          <summary>raw memory</summary>
+                          <pre>{entry.rawMemory}</pre>
+                        </details>
+                      </article>
+                    ))}
+                  </div>
+                </section>
               ) : (
-                <div className="memory-list">
-                  {memory.data.entries.map((entry) => (
-                    <article key={entry.threadId} className="memory-card">
-                      <header>
-                        <div>
-                          <h3>{entry.title}</h3>
-                          <p>{entry.threadId}</p>
-                        </div>
-                        <div className="memory-meta">
-                          <span><Clock3 size={13} />{formatDateTime(entry.generatedAt)}</span>
-                          <span><BookMarked size={13} />{entry.usageCount ?? 0}</span>
-                        </div>
-                      </header>
-                      <p className="memory-summary">{entry.rolloutSummary || "요약 없음"}</p>
-                      <details className="inline-disclosure">
-                        <summary>raw memory</summary>
-                        <pre>{entry.rawMemory}</pre>
-                      </details>
-                    </article>
-                  ))}
-                </div>
+                <section className="memory-section compact-section">
+                  <div className="memory-section-header">
+                    <div>
+                      <p className="eyebrow">SESSION MEMORY</p>
+                      <h3>추출 기록</h3>
+                    </div>
+                  </div>
+                  <div className="memory-inline-empty">
+                    <span>{getSessionMemoryLabel(memory.data)}</span>
+                    <small>{getSessionMemoryMeta(memory.data)}</small>
+                  </div>
+                </section>
               )}
-            </>
+            </div>
           ) : null}
         </AsyncPane>
       </Panel>
@@ -91,25 +127,25 @@ export function MemoryPage() {
   );
 }
 
-function getMemoryStateTitle(status: "ready" | "empty" | "unsupported") {
-  if (status === "unsupported") {
-    return "source table 없음";
+function getSessionMemoryLabel(memory: MemoryResponse) {
+  if (memory.sourceStatus === "unsupported") {
+    return "지원 없음";
   }
 
-  if (status === "empty") {
+  if (memory.sourceStatus === "empty") {
     return "추출 기록 없음";
   }
 
-  return "메모리 준비";
+  return "추출됨";
 }
 
-function getMemoryStateMeta(memory: MemoryResponse) {
+function getSessionMemoryMeta(memory: MemoryResponse) {
   if (memory.sourceStatus === "unsupported") {
     return "stage1_outputs 없음";
   }
 
   if (memory.sourceStatus === "empty") {
-    return `stage1_outputs 0 · threads ${formatNumber(memory.totalThreads)}`;
+    return "현재 세션 메모리 row 없음";
   }
 
   return `stage1_outputs ${formatNumber(memory.stage1OutputCount)}`;

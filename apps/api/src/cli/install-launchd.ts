@@ -40,9 +40,13 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
   <key>EnvironmentVariables</key>
   <dict>
     <key>CODEX_HOME</key>
-    <string>${escapeXml(config.codexHome)}</string>
+    <string>${escapeXml(config.providers.codex.codexHome)}</string>
     <key>AGENTS_HOME</key>
-    <string>${escapeXml(config.agentsHome)}</string>
+    <string>${escapeXml(config.providers.codex.agentsHome)}</string>
+    <key>CLAUDE_CODE_HOME</key>
+    <string>${escapeXml(config.providers.claudeCode.home)}</string>
+    <key>MONITOR_PROVIDER</key>
+    <string>${escapeXml(config.activeProviderId)}</string>
     <key>MONITOR_DB</key>
     <string>${escapeXml(config.monitorDbPath)}</string>
   </dict>
