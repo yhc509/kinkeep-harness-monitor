@@ -6,14 +6,6 @@ The project currently runs on the `Codex` provider. The data layer is already sp
 
 ## Screenshots
 
-### Dashboard
-
-![Dashboard](docs/screenshots/dashboard.png)
-
-### Tokens
-
-![Tokens](docs/screenshots/tokens.png)
-
 ## What You Can See
 
 ### Dashboard
