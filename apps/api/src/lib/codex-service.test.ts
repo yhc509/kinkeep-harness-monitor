@@ -11,14 +11,14 @@ afterEach(() => {
 });
 
 describe("CodexDataService", () => {
-  it("세션 목록과 상세를 읽고 프로젝트 정보를 붙인다", () => {
+  it("reads session lists and details with project metadata", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
     const service = new CodexDataService(fixture.config);
 
     const sessions = service.listSessions({ limit: 10 });
     expect(sessions).toHaveLength(4);
-    expect(sessions[0]?.title).toBe("데모 세션");
+    expect(sessions[0]?.title).toBe("Demo session");
     expect(sessions[0]?.projectName).toBe("demo-project");
 
     const detail = service.getSessionDetail("thread-1");
@@ -32,7 +32,7 @@ describe("CodexDataService", () => {
     expect(detail?.timeline.find((item) => item.kind === "tool_result" && item.toolName === "spawn_agent")?.title).toBe("Tool output: spawn_agent");
   });
 
-  it("프로젝트를 git 루트 우선으로 묶고, 기본 목록에서는 서브에이전트를 숨긴다", () => {
+  it("groups projects by git root first and hides subagents in the default list", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
     const service = new CodexDataService(fixture.config);
@@ -57,7 +57,7 @@ describe("CodexDataService", () => {
     expect(standalone?.path.endsWith("/scratchpad")).toBe(true);
   });
 
-  it("서브에이전트 상세에서는 부모 세션 정보를 준다", () => {
+  it("returns parent session information for subagent detail", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
     const service = new CodexDataService(fixture.config);
@@ -65,21 +65,21 @@ describe("CodexDataService", () => {
     const detail = service.getSessionDetail("thread-5");
     expect(detail?.isSubagent).toBe(true);
     expect(detail?.parentSessionId).toBe("thread-1");
-    expect(detail?.parentSessionTitle).toBe("데모 세션");
+    expect(detail?.parentSessionTitle).toBe("Demo session");
     expect(detail?.subagentNickname).toBe("Noether");
     expect(detail?.subagents).toHaveLength(0);
   });
 
-  it("메모리와 통합 정보를 읽는다", () => {
+  it("reads memory and integration data", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
     const service = new CodexDataService(fixture.config);
 
     const memory = service.getMemory();
-    expect(memory.entries[0]?.rawMemory).toBe("기억된 메모리");
+    expect(memory.entries[0]?.rawMemory).toBe("Remembered memory");
     expect(memory.sourceStatus).toBe("ready");
     expect(memory.stage1OutputCount).toBe(1);
-    expect(memory.developerInstructions).toContain("근본 원인");
+    expect(memory.developerInstructions).toContain("root causes");
     expect(memory.personality).toBe("friendly");
 
     service.refreshIntegrationsUsage(new Date("2026-03-14T10:15:00+09:00"));
@@ -99,14 +99,14 @@ describe("CodexDataService", () => {
     expect(skillDetail?.content).toContain("description:");
   });
 
-  it("메모리 source 상태를 구분한다", () => {
+  it("distinguishes memory source states", () => {
     const emptyFixture = createTestFixture({ stage1Mode: "empty" });
     fixtures.push(emptyFixture);
     const emptyService = new CodexDataService(emptyFixture.config);
     const emptyMemory = emptyService.getMemory();
     expect(emptyMemory.sourceStatus).toBe("empty");
     expect(emptyMemory.stage1OutputCount).toBe(0);
-    expect(emptyMemory.developerInstructions).toContain("한국어 응답");
+    expect(emptyMemory.developerInstructions).toContain("Respond in English");
 
     const unsupportedFixture = createTestFixture({ stage1Mode: "unsupported" });
     fixtures.push(unsupportedFixture);

@@ -59,8 +59,8 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 fs.writeFileSync(plistPath, plist, "utf8");
-console.log(`launchd plist 생성 완료: ${plistPath}`);
-console.log("로드 명령:");
+console.log(`Created launchd plist: ${plistPath}`);
+console.log("Load command:");
 console.log(`launchctl bootstrap gui/$(id -u) ${plistPath}`);
 
 function escapeXml(value: string): string {

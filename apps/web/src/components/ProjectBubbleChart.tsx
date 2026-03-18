@@ -48,8 +48,8 @@ export function ProjectBubbleChart({ data }: ProjectBubbleChartProps) {
   if (data.length === 0) {
     return (
       <div className="project-bubble-empty">
-        <strong>토큰 사용 프로젝트 없음</strong>
-        <p>선택한 기간에는 기록된 프로젝트 토큰 사용량이 없습니다.</p>
+        <strong>No project token usage</strong>
+        <p>There is no recorded project token usage for the selected period.</p>
       </div>
     );
   }
@@ -76,7 +76,7 @@ export function ProjectBubbleChart({ data }: ProjectBubbleChartProps) {
         className="project-bubble-svg"
         viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
         role="img"
-        aria-label="프로젝트별 토큰 사용량 버블 차트"
+        aria-label="Project token usage bubble chart"
       >
         {nodes.map((node, index) => {
           const showName = node.r >= 40;
@@ -129,8 +129,8 @@ export function ProjectBubbleChart({ data }: ProjectBubbleChartProps) {
         >
           <strong>{tooltip.item.projectName}</strong>
           {tooltip.item.projectPath ? <p>{tooltip.item.projectPath}</p> : null}
-          <span>총 토큰 {formatNumber(tooltip.item.totalTokens)}</span>
-          <span>요청 {formatNumber(tooltip.item.requestCount)}회</span>
+          <span>Total tokens {formatNumber(tooltip.item.totalTokens)}</span>
+          <span>Requests {formatNumber(tooltip.item.requestCount)}</span>
         </div>
       ) : null}
     </div>

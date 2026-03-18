@@ -39,7 +39,7 @@ export function SessionTimeline({ items, showActivity, showTechnical }: SessionT
                       <pre>{item.body || "-"}</pre>
                     </div>
                     <div className={isUser ? "chat-meta user" : "chat-meta assistant"}>
-                      <span>{isUser ? "사용자" : "에이전트"}</span>
+                      <span>{isUser ? "User" : "Agent"}</span>
                       <span>{formatDateTime(item.timestamp)}</span>
                     </div>
                   </div>
@@ -68,7 +68,7 @@ export function SessionTimeline({ items, showActivity, showTechnical }: SessionT
           })}
         </div>
       ) : (
-        <div className="state-box">대화 메시지 없음</div>
+        <div className="state-box">No conversation messages</div>
       )}
 
       {showTechnical ? (
@@ -86,7 +86,7 @@ export function SessionTimeline({ items, showActivity, showTechnical }: SessionT
             ))}
           </div>
         ) : (
-          <div className="state-box">기술 로그 없음</div>
+          <div className="state-box">No technical logs</div>
         )
       ) : null}
     </div>
@@ -112,8 +112,8 @@ function summarizeActivity(item: TimelineInput) {
   if (item.kind === "tool_call") {
     if (toolName === "spawn_agent") {
       return {
-        label: "서브에이전트 호출",
-        summary: [stringValue(payload.agent_type) ?? "agent", booleanValue(payload.fork_context) ? "컨텍스트 복사" : "새 컨텍스트"].join(" · "),
+        label: "Spawn subagent",
+        summary: [stringValue(payload.agent_type) ?? "agent", booleanValue(payload.fork_context) ? "Forked context" : "New context"].join(" · "),
         meta: firstLine(stringValue(payload.message) ?? item.body),
         icon: Bot,
         tone: "agent" as const
@@ -122,8 +122,8 @@ function summarizeActivity(item: TimelineInput) {
 
     if (toolName === "send_input") {
       return {
-        label: "서브에이전트 지시",
-        summary: booleanValue(payload.interrupt) ? "즉시 전달" : "대기열 전달",
+        label: "Send input",
+        summary: booleanValue(payload.interrupt) ? "Interrupt" : "Queued",
         meta: firstLine(stringValue(payload.message) ?? stringValue(payload.id) ?? item.body),
         icon: Send,
         tone: "agent" as const
@@ -132,8 +132,8 @@ function summarizeActivity(item: TimelineInput) {
 
     if (toolName === "wait") {
       return {
-        label: "에이전트 대기",
-        summary: `${arrayLength(payload.ids)}개 · ${formatDuration(stringNumber(payload.timeout_ms))}`,
+        label: "Wait for agent",
+        summary: `${arrayLength(payload.ids)} items · ${formatDuration(stringNumber(payload.timeout_ms))}`,
         meta: null,
         icon: Clock3,
         tone: "muted" as const
@@ -142,7 +142,7 @@ function summarizeActivity(item: TimelineInput) {
 
     if (toolName.startsWith("mcp__")) {
       return {
-        label: "MCP 호출",
+        label: "MCP call",
         summary: describeMcpTool(toolName),
         meta: firstLine(stringValue(payload.query) ?? stringValue(payload.url) ?? item.body),
         icon: PlugZap,
@@ -151,7 +151,7 @@ function summarizeActivity(item: TimelineInput) {
     }
 
     return {
-      label: "도구 호출",
+      label: "Tool call",
       summary: toolName,
       meta: firstLine(compactSnippet(item.body)),
       icon: Wrench,
@@ -161,8 +161,8 @@ function summarizeActivity(item: TimelineInput) {
 
   if (toolName === "spawn_agent") {
     return {
-      label: "서브에이전트 생성",
-      summary: stringValue(payload.nickname) ?? stringValue(payload.agent_id) ?? "생성 완료",
+      label: "Subagent created",
+      summary: stringValue(payload.nickname) ?? stringValue(payload.agent_id) ?? "Created",
       meta: null,
       icon: Bot,
       tone: "agent" as const
@@ -171,8 +171,8 @@ function summarizeActivity(item: TimelineInput) {
 
   if (toolName === "send_input") {
     return {
-      label: "지시 전달",
-      summary: stringValue(payload.submission_id) ?? "전달 완료",
+      label: "Input sent",
+      summary: stringValue(payload.submission_id) ?? "Sent",
       meta: null,
       icon: Send,
       tone: "agent" as const
@@ -181,8 +181,8 @@ function summarizeActivity(item: TimelineInput) {
 
   if (toolName === "wait") {
     return {
-      label: "대기 결과",
-      summary: booleanValue(payload.timed_out) ? "시간 초과" : "응답 수신",
+      label: "Wait result",
+      summary: booleanValue(payload.timed_out) ? "Timed out" : "Response received",
       meta: null,
       icon: Clock3,
       tone: booleanValue(payload.timed_out) ? "warm" as const : "muted" as const
@@ -191,7 +191,7 @@ function summarizeActivity(item: TimelineInput) {
 
   if (toolName.startsWith("mcp__")) {
     return {
-      label: "MCP 결과",
+      label: "MCP result",
       summary: describeMcpTool(toolName),
       meta: firstLine(compactSnippet(item.body)),
       icon: PlugZap,
@@ -200,7 +200,7 @@ function summarizeActivity(item: TimelineInput) {
   }
 
   return {
-    label: "도구 결과",
+    label: "Tool result",
     summary: toolName,
     meta: firstLine(summarizeToolResult(item.body)),
     icon: TerminalSquare,
@@ -229,12 +229,12 @@ function describeMcpTool(toolName: string) {
 function summarizeToolResult(body: string) {
   const compact = compactSnippet(body);
   if (!compact) {
-    return "결과 없음";
+    return "No result";
   }
 
   const exitCode = body.match(/Process exited with code (\d+)/);
   if (exitCode) {
-    return `종료 코드 ${exitCode[1]}`;
+    return `Exit code ${exitCode[1]}`;
   }
 
   return compact;
@@ -283,8 +283,8 @@ function formatDuration(value: number | null) {
   }
 
   if (value % 60_000 === 0) {
-    return `${value / 60_000}분`;
+    return `${value / 60_000} min`;
   }
 
-  return `${Math.round(value / 1000)}초`;
+  return `${Math.round(value / 1000)} sec`;
 }

@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("API server", () => {
-  it("주요 API 응답을 반환한다", async () => {
+  it("returns the main API responses", async () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 

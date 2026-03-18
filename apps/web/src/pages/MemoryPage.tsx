@@ -18,9 +18,9 @@ export function MemoryPage() {
     <div className="page-stack">
       <section className="page-heading memory-heading">
         <div>
-          <p className="eyebrow">메모리</p>
-          <h2>개인 선호</h2>
-          <p className="heading-subtle">Codex 설정 기준</p>
+          <p className="eyebrow">MEMORY</p>
+          <h2>Preferences</h2>
+          <p className="heading-subtle">Based on Codex settings</p>
         </div>
         {memory.data?.personality ? (
           <div className="page-chip-group">
@@ -33,7 +33,7 @@ export function MemoryPage() {
       </section>
 
       <Panel
-        title="개인 선호"
+        title="Preferences"
         subtitle="developer_instructions"
         icon={<Brain size={16} strokeWidth={2.2} />}
       >
@@ -44,22 +44,22 @@ export function MemoryPage() {
                 <div className="preference-card-header">
                   <div>
                     <p className="eyebrow">PREFERENCE</p>
-                    <h3>개인 선호</h3>
+                    <h3>Preferences</h3>
                   </div>
                   {memory.data.personality ? (
                     <span className="panel-badge">{memory.data.personality}</span>
                   ) : null}
                 </div>
-                <pre className="preference-body">{memory.data.developerInstructions || "설정 없음"}</pre>
+                <pre className="preference-body">{memory.data.developerInstructions || "No settings"}</pre>
               </section>
 
               <aside className="memory-status-card">
                 <div className="memory-status-row">
-                  <span>세션 메모리</span>
+                  <span>Session memory</span>
                   <strong>{getSessionMemoryLabel(memory.data)}</strong>
                 </div>
                 <div className="memory-status-row">
-                  <span>추출 기록</span>
+                  <span>Extracted entries</span>
                   <strong>{formatNumber(memory.data.stage1OutputCount)}</strong>
                 </div>
                 <div className="memory-status-row">
@@ -73,7 +73,7 @@ export function MemoryPage() {
                   <div className="memory-section-header">
                     <div>
                       <p className="eyebrow">SESSION MEMORY</p>
-                      <h3>추출 기록</h3>
+                      <h3>Extracted entries</h3>
                     </div>
                     <div className="page-chip-group">
                       <div className="page-chip">
@@ -96,7 +96,7 @@ export function MemoryPage() {
                             <span><BookMarked size={13} />{entry.usageCount ?? 0}</span>
                           </div>
                         </header>
-                        <p className="memory-summary">{entry.rolloutSummary || "요약 없음"}</p>
+                        <p className="memory-summary">{entry.rolloutSummary || "No summary"}</p>
                         <details className="inline-disclosure">
                           <summary>raw memory</summary>
                           <pre>{entry.rawMemory}</pre>
@@ -110,7 +110,7 @@ export function MemoryPage() {
                   <div className="memory-section-header">
                     <div>
                       <p className="eyebrow">SESSION MEMORY</p>
-                      <h3>추출 기록</h3>
+                      <h3>Extracted entries</h3>
                     </div>
                   </div>
                   <div className="memory-inline-empty">
@@ -129,23 +129,23 @@ export function MemoryPage() {
 
 function getSessionMemoryLabel(memory: MemoryResponse) {
   if (memory.sourceStatus === "unsupported") {
-    return "지원 없음";
+    return "Unsupported";
   }
 
   if (memory.sourceStatus === "empty") {
-    return "추출 기록 없음";
+    return "No extracted entries";
   }
 
-  return "추출됨";
+  return "Extracted";
 }
 
 function getSessionMemoryMeta(memory: MemoryResponse) {
   if (memory.sourceStatus === "unsupported") {
-    return "stage1_outputs 없음";
+    return "No stage1_outputs";
   }
 
   if (memory.sourceStatus === "empty") {
-    return "현재 세션 메모리 row 없음";
+    return "No session memory row for the current session";
   }
 
   return `stage1_outputs ${formatNumber(memory.stage1OutputCount)}`;

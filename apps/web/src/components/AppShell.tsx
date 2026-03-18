@@ -3,11 +3,11 @@ import { NavLink, Outlet } from "react-router-dom";
 import { prefetchRoute } from "../route-prefetch";
 
 const navItems = [
-  { to: "/", label: "대시보드", end: true, icon: LayoutDashboard },
-  { to: "/sessions", label: "세션", icon: MessagesSquare },
-  { to: "/memory", label: "메모리", icon: Brain },
-  { to: "/integrations", label: "통합", icon: Blocks },
-  { to: "/tokens", label: "토큰", icon: ChartColumnBig }
+  { to: "/", label: "Dashboard", end: true, icon: LayoutDashboard },
+  { to: "/sessions", label: "Sessions", icon: MessagesSquare },
+  { to: "/memory", label: "Memory", icon: Brain },
+  { to: "/integrations", label: "Integrations", icon: Blocks },
+  { to: "/tokens", label: "Tokens", icon: ChartColumnBig }
 ];
 
 export function AppShell() {

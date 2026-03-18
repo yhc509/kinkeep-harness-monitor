@@ -37,7 +37,7 @@ export function createTestFixture(options: { stage1Mode?: "ready" | "empty" | "u
   fs.writeFileSync(path.join(worktreeProjectRoot, ".git"), "gitdir: /tmp/fake-linked-project.git", "utf8");
 
   fs.writeFileSync(path.join(codexHome, "config.toml"), `
-developer_instructions = "한국어 응답, 근본 원인 우선, 설명은 간결하게"
+developer_instructions = "Respond in English, prioritize root causes, keep explanations concise"
 personality = "friendly"
 notify = ["node", "/tmp/notify-hook.js"]
 
@@ -78,7 +78,7 @@ description: Review skill from agents
         content: [
           {
             type: "input_text",
-            text: "사용자 요청"
+            text: "User request"
           }
         ]
       }
@@ -92,7 +92,7 @@ description: Review skill from agents
         content: [
           {
             type: "output_text",
-            text: "도와드릴게요."
+            text: "I can help with that."
           }
         ]
       }
@@ -113,7 +113,7 @@ description: Review skill from agents
       payload: {
         type: "function_call",
         name: "spawn_agent",
-        arguments: "{\"agent_type\":\"explorer\",\"message\":\"탐색해줘\"}",
+        arguments: "{\"agent_type\":\"explorer\",\"message\":\"Please explore this\"}",
         call_id: "call-spawn-1"
       }
     },
@@ -177,7 +177,7 @@ description: Review skill from agents
       payload: {
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text: "같은 프로젝트의 다른 세션" }]
+        content: [{ type: "input_text", text: "Another session in the same project" }]
       }
     }
   ]);
@@ -198,7 +198,7 @@ description: Review skill from agents
       payload: {
         type: "message",
         role: "assistant",
-        content: [{ type: "output_text", text: "워크트리 세션입니다." }]
+        content: [{ type: "output_text", text: "This is a worktree session." }]
       }
     }
   ]);
@@ -219,7 +219,7 @@ description: Review skill from agents
       payload: {
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text: "비깃 프로젝트 세션" }]
+        content: [{ type: "input_text", text: "Non-git project session" }]
       }
     }
   ]);
@@ -240,7 +240,7 @@ description: Review skill from agents
       payload: {
         type: "message",
         role: "assistant",
-        content: [{ type: "output_text", text: "탐색 결과를 정리합니다." }]
+        content: [{ type: "output_text", text: "Summarizing the exploration results." }]
       }
     }
   ]);
@@ -261,7 +261,7 @@ description: Review skill from agents
       payload: {
         type: "message",
         role: "assistant",
-        content: [{ type: "output_text", text: "구현 작업을 진행합니다." }]
+        content: [{ type: "output_text", text: "Starting the implementation work." }]
       }
     }
   ]);
@@ -317,7 +317,7 @@ description: Review skill from agents
     createdAt: 1_710_384_000,
     updatedAt: 1_710_387_600,
     cwd: gitProjectClient,
-    title: "데모 세션",
+    title: "Demo session",
     tokensUsed: 140
   });
   insertThread(stateDb, {
@@ -326,7 +326,7 @@ description: Review skill from agents
     createdAt: 1_710_383_000,
     updatedAt: 1_710_385_000,
     cwd: gitProjectTools,
-    title: "같은 프로젝트 세션",
+    title: "Same project session",
     tokensUsed: 0
   });
   insertThread(stateDb, {
@@ -335,7 +335,7 @@ description: Review skill from agents
     createdAt: 1_710_382_000,
     updatedAt: 1_710_382_600,
     cwd: worktreeProjectApp,
-    title: "워크트리 세션",
+    title: "Worktree session",
     tokensUsed: 0
   });
   insertThread(stateDb, {
@@ -344,7 +344,7 @@ description: Review skill from agents
     createdAt: 1_710_381_000,
     updatedAt: 1_710_381_600,
     cwd: standaloneProjectRoot,
-    title: "비깃 세션",
+    title: "Non-git session",
     tokensUsed: 0
   });
   insertThread(stateDb, {
@@ -353,7 +353,7 @@ description: Review skill from agents
     createdAt: 1_710_387_800,
     updatedAt: 1_710_387_900,
     cwd: gitProjectClient,
-    title: "데모 세션",
+    title: "Demo session",
     tokensUsed: 0,
     source: JSON.stringify({
       subagent: {
@@ -367,7 +367,7 @@ description: Review skill from agents
     }),
     agentNickname: "Noether",
     agentRole: "explorer",
-    firstUserMessage: "탐색만 맡아줘"
+    firstUserMessage: "Handle exploration only"
   });
   insertThread(stateDb, {
     id: "thread-6",
@@ -375,7 +375,7 @@ description: Review skill from agents
     createdAt: 1_710_388_000,
     updatedAt: 1_710_388_100,
     cwd: gitProjectClient,
-    title: "데모 세션",
+    title: "Demo session",
     tokensUsed: 0,
     source: JSON.stringify({
       subagent: {
@@ -389,7 +389,7 @@ description: Review skill from agents
     }),
     agentNickname: "Boyle",
     agentRole: "worker",
-    firstUserMessage: "구현만 맡아줘"
+    firstUserMessage: "Handle implementation only"
   });
 
   if (stage1Mode === "ready") {
@@ -406,8 +406,8 @@ description: Review skill from agents
     `).run(
       "thread-1",
       1_710_387_600,
-      "기억된 메모리",
-      "요약",
+      "Remembered memory",
+      "Summary",
       1_710_387_600,
       2,
       1_710_387_600
@@ -494,7 +494,7 @@ function insertThread(
     "danger-full-access",
     "never",
     thread.tokensUsed,
-    thread.firstUserMessage ?? "사용자 요청",
+    thread.firstUserMessage ?? "User request",
     thread.agentNickname ?? null,
     thread.agentRole ?? null,
     "enabled"

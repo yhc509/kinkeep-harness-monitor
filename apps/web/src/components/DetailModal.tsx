@@ -51,7 +51,7 @@ export function DetailModal({ open, title, subtitle, onClose, children }: Detail
             <h2>{title}</h2>
             {subtitle ? <p className="modal-subtitle">{subtitle}</p> : null}
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="닫기">
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X size={16} strokeWidth={2.2} />
           </button>
         </header>

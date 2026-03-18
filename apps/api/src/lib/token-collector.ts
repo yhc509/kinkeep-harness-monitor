@@ -28,8 +28,8 @@ const PROJECT_USAGE_LIMIT = 12;
 const MODEL_USAGE_LIMIT = 6;
 const UNKNOWN_PROJECT_ID = "__unknown__";
 const OTHER_PROJECT_ID = "__other__";
-const OTHER_MODEL_NAME = "기타";
-const UNKNOWN_MODEL_NAME = "모델 미상";
+const OTHER_MODEL_NAME = "Other";
+const UNKNOWN_MODEL_NAME = "Unknown Model";
 
 export interface SnapshotResult extends TokenSyncResult {}
 
@@ -425,7 +425,7 @@ export class TokenCollectorService {
     if (hiddenProjects.length > 0) {
       visibleProjects.push({
         projectId: OTHER_PROJECT_ID,
-        projectName: "기타",
+        projectName: "Other",
         projectPath: "",
         totalTokens: hiddenProjects.reduce((sum, item) => sum + item.totalTokens, 0),
         requestCount: hiddenProjects.reduce((sum, item) => sum + item.requestCount, 0)
@@ -640,7 +640,7 @@ export class TokenCollectorService {
       }
 
       const finishedAt = toLocalDateTime(new Date()) ?? "";
-      const message = error instanceof Error ? error.message : "알 수 없는 오류";
+      const message = error instanceof Error ? error.message : "Unknown error";
       insertCollectorRun(database, {
         startedAt,
         finishedAt,
@@ -689,15 +689,15 @@ function insertCollectorRun(
 
 function buildRunMessage(preparation: SyncPreparation, stats: TokenSyncStats): string {
   if (stats.updatedRollouts === 0 && stats.deletedRollouts === 0) {
-    return "변경 없음 · 기존 토큰 캐시 유지";
+    return "No changes · kept existing token cache";
   }
 
   return [
-    "토큰 캐시 동기화 완료",
-    `전체 ${stats.totalRollouts}개`,
-    `갱신 ${stats.updatedRollouts}개`,
-    `삭제 ${stats.deletedRollouts}개`,
-    `이벤트 ${stats.tokenEvents.toLocaleString()}건`
+    "Token cache sync complete",
+    `total ${stats.totalRollouts}`,
+    `updated ${stats.updatedRollouts}`,
+    `deleted ${stats.deletedRollouts}`,
+    `events ${stats.tokenEvents.toLocaleString("en-US")}`
   ].join(" · ");
 }
 
@@ -727,7 +727,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     try {
       parsed = JSON.parse(line) as typeof parsed;
     } catch (error) {
-      throw new Error(`rollout 파싱 실패: ${rolloutPath}\n${error instanceof Error ? error.message : "알 수 없는 오류"}`);
+      throw new Error(`Failed to parse rollout: ${rolloutPath}\n${error instanceof Error ? error.message : "Unknown error"}`);
     }
 
     const payload = parsed.payload ?? {};
@@ -913,7 +913,7 @@ function mapHourlyUsageRow(row: HourlyUsageRow): HourlyTokenUsage {
 function mapProjectUsageRow(row: ProjectUsageRow): ProjectTokenUsageItem {
   return {
     projectId: row.project_id || UNKNOWN_PROJECT_ID,
-    projectName: row.project_name || "알 수 없음",
+    projectName: row.project_name || "Unknown",
     projectPath: row.project_path,
     totalTokens: row.total_tokens,
     requestCount: row.request_count
@@ -981,7 +981,7 @@ function mapCollectorRunRow(row: CollectorRunRow): CollectorRun {
 function createUnknownProjectInfo(): ResolvedProjectInfo {
   return {
     projectId: UNKNOWN_PROJECT_ID,
-    projectName: "알 수 없음",
+    projectName: "Unknown",
     projectPath: ""
   };
 }
@@ -1057,13 +1057,13 @@ function addPeriod(date: Date, unit: TokenPeriodUnit, delta: number): Date {
 
 function formatPeriodLabel(startDate: Date, unit: TokenPeriodUnit, endDate: Date): string {
   if (unit === "month") {
-    return new Intl.DateTimeFormat("ko-KR", {
+    return new Intl.DateTimeFormat("en-US", {
       year: "numeric",
       month: "long"
     }).format(startDate);
   }
 
-  const dayFormatter = new Intl.DateTimeFormat("ko-KR", {
+  const dayFormatter = new Intl.DateTimeFormat("en-US", {
     month: "long",
     day: "numeric"
   });

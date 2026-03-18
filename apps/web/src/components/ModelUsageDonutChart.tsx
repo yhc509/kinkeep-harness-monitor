@@ -32,8 +32,8 @@ export function ModelUsageDonutChart({ data }: ModelUsageDonutChartProps) {
   if (totalTokens <= 0) {
     return (
       <div className="model-usage-empty">
-        <strong>모델 사용 기록 없음</strong>
-        <p>선택한 기간에 토큰이 기록되면 여기서 모델 비율을 볼 수 있습니다.</p>
+        <strong>No model usage recorded</strong>
+        <p>Model share will appear here once tokens are recorded for the selected range.</p>
       </div>
     );
   }
@@ -68,7 +68,7 @@ export function ModelUsageDonutChart({ data }: ModelUsageDonutChartProps) {
           </PieChart>
         </ResponsiveContainer>
         <div className="model-usage-center">
-          <span>총 토큰</span>
+          <span>Total tokens</span>
           <strong>{formatNumber(totalTokens)}</strong>
         </div>
       </div>
@@ -80,7 +80,7 @@ export function ModelUsageDonutChart({ data }: ModelUsageDonutChartProps) {
               <span className="model-usage-swatch" style={{ backgroundColor: item.color }} />
               <div className="model-usage-copy">
                 <strong>{item.label}</strong>
-                {item.modelProvider && item.modelName !== "기타" ? <span>{item.modelProvider}</span> : null}
+                {item.modelProvider && item.modelName !== "Other" ? <span>{item.modelProvider}</span> : null}
               </div>
             </div>
             <div className="model-usage-value">
@@ -103,19 +103,19 @@ function ModelUsageTooltip({ active, payload }: TooltipProps) {
   return (
     <div className="model-usage-tooltip">
       <strong>{item.label}</strong>
-      {item.modelProvider && item.modelName !== "기타" ? <span>{item.modelProvider}</span> : null}
-      <p>토큰 {formatNumber(item.totalTokens)}</p>
-      <p>점유율 {formatPercent(item.share)}</p>
+      {item.modelProvider && item.modelName !== "Other" ? <span>{item.modelProvider}</span> : null}
+      <p>Tokens {formatNumber(item.totalTokens)}</p>
+      <p>Share {formatPercent(item.share)}</p>
     </div>
   );
 }
 
 function formatModelLabel(item: ModelTokenUsageItem): string {
-  if (item.modelName === "기타") {
+  if (item.modelName === "Other") {
     return item.modelName;
   }
 
-  if (item.modelName === "모델 미상" && item.modelProvider) {
+  if (item.modelName === "Unknown Model" && item.modelProvider) {
     return `${item.modelProvider} · ${item.modelName}`;
   }
 

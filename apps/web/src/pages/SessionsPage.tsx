@@ -138,7 +138,7 @@ export function SessionsPage() {
         <section className="page-heading">
           <div>
             <p className="eyebrow">SESSIONS</p>
-            <h2>프로젝트 선택</h2>
+            <h2>Choose a project</h2>
           </div>
           {projects.data ? (
             <div className="page-chip-group">
@@ -152,14 +152,14 @@ export function SessionsPage() {
             <Search size={14} strokeWidth={2.2} />
             <input
               className="search-input"
-              placeholder="프로젝트 이름 또는 경로 검색"
+              placeholder="Search project name or path"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
         </section>
 
-        <Panel title="Projects" subtitle="최근 작업 순" icon={<Folders size={16} strokeWidth={2.2} />}>
+        <Panel title="Projects" subtitle="Most recently active" icon={<Folders size={16} strokeWidth={2.2} />}>
           <AsyncPane loading={projects.initialLoading} error={projects.error} hasData={projects.hasData}>
             {projects.data?.length ? (
               <div className="project-list dense-list">
@@ -183,7 +183,7 @@ export function SessionsPage() {
                 ))}
               </div>
             ) : (
-              <div className="state-box">프로젝트 없음</div>
+              <div className="state-box">No projects</div>
             )}
           </AsyncPane>
         </Panel>
@@ -198,11 +198,11 @@ export function SessionsPage() {
           <div className="heading-stack">
             <Link to="/sessions" className="back-link">
               <ArrowLeft size={14} strokeWidth={2.2} />
-              프로젝트 목록
+              Project list
             </Link>
             <div>
               <p className="eyebrow">PROJECT</p>
-              <h2>{activeProject?.name ?? "프로젝트"}</h2>
+              <h2>{activeProject?.name ?? "Project"}</h2>
               <p className="heading-subtle">{activeProject?.path ?? params.projectId}</p>
             </div>
           </div>
@@ -224,7 +224,7 @@ export function SessionsPage() {
             <Search size={14} strokeWidth={2.2} />
             <input
               className="search-input"
-              placeholder="이 프로젝트의 세션 검색"
+              placeholder="Search sessions in this project"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -233,13 +233,13 @@ export function SessionsPage() {
 
         <Panel
           title="Sessions"
-          subtitle="루트 세션 중심"
+          subtitle="Root sessions first"
           icon={<MessagesSquare size={16} strokeWidth={2.2} />}
           actions={(
             <div className="panel-badges">
               <button className="ghost-button" onClick={() => setIncludeSubagents((prev) => !prev)}>
                 <Bot size={14} strokeWidth={2.2} />
-                {includeSubagents ? "서브에이전트 숨기기" : "서브에이전트 포함"}
+                {includeSubagents ? "Hide subagents" : "Include subagents"}
               </button>
             </div>
           )}
@@ -323,10 +323,10 @@ export function SessionsPage() {
                   ) : null}
                 </div>
               ) : (
-                <div className="state-box">세션 없음</div>
+                <div className="state-box">No sessions</div>
               )
             ) : (
-              <div className="state-box">프로젝트 없음</div>
+              <div className="state-box">No projects</div>
             )}
           </AsyncPane>
         </Panel>
@@ -344,7 +344,7 @@ export function SessionsPage() {
         <div className="heading-stack">
           <Link to="/sessions" className="back-link">
             <ArrowLeft size={14} strokeWidth={2.2} />
-            프로젝트 목록
+            Project list
           </Link>
           <div className="session-breadcrumbs">
             {activeProject ? (
@@ -359,17 +359,17 @@ export function SessionsPage() {
 
       <Panel
         title="Conversation"
-        subtitle="사용자와 에이전트 대화"
+        subtitle="User and agent conversation"
         icon={<MessagesSquare size={16} strokeWidth={2.2} />}
         actions={(
           <div className="panel-badges">
             <button className="ghost-button" onClick={() => setShowActivity((prev) => !prev)}>
               <Bot size={14} strokeWidth={2.2} />
-              {showActivity ? "작업 이벤트 숨기기" : "작업 이벤트 보기"}
+              {showActivity ? "Hide activity" : "Show activity"}
             </button>
             <button className="ghost-button" onClick={() => setShowTechnical((prev) => !prev)}>
               <SlidersHorizontal size={14} strokeWidth={2.2} />
-              {showTechnical ? "기술 로그 숨기기" : "기술 로그 보기"}
+              {showTechnical ? "Hide technical logs" : "Show technical logs"}
             </button>
           </div>
         )}
@@ -391,7 +391,7 @@ export function SessionsPage() {
                     to={`/sessions/projects/${detailData.projectId}/${detailData.parentSessionId}`}
                     className="back-link"
                   >
-                    부모 세션: {detailData.parentSessionTitle ?? "세션"}
+                    Parent session: {detailData.parentSessionTitle ?? "Session"}
                   </Link>
                 </div>
               ) : null}
@@ -409,7 +409,7 @@ export function SessionsPage() {
                 <div className="detail-meta">
                   <span>{detailData.modelProvider}</span>
                   <span>{detailData.memoryMode}</span>
-                  <span>업데이트 {formatDateTime(detailData.updatedAt)}</span>
+                  <span>Updated {formatDateTime(detailData.updatedAt)}</span>
                 </div>
               </div>
 
@@ -418,7 +418,7 @@ export function SessionsPage() {
                   <div className="subagent-summary-header">
                     <div>
                       <p className="eyebrow">SUBAGENTS</p>
-                      <h4>하위 작업 {detailData.subagents.length}개</h4>
+                      <h4>{detailData.subagents.length} subagents</h4>
                     </div>
                     <button className="ghost-button" onClick={() => setShowSubagentSummary((prev) => !prev)}>
                       <ChevronDown
@@ -426,7 +426,7 @@ export function SessionsPage() {
                         strokeWidth={2.2}
                         className={showSubagentSummary ? "chevron-open" : "chevron-closed"}
                       />
-                      {showSubagentSummary ? "접기" : "펼치기"}
+                      {showSubagentSummary ? "Collapse" : "Expand"}
                     </button>
                   </div>
 
@@ -466,7 +466,7 @@ export function SessionsPage() {
               <SessionTimeline items={detailData.timeline} showActivity={showActivity} showTechnical={showTechnical} />
             </div>
           ) : (
-            <div className="state-box">세션 없음</div>
+            <div className="state-box">No sessions</div>
           )}
         </AsyncPane>
       </Panel>

@@ -76,7 +76,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
 
     if (!detail) {
       reply.code(404);
-      return { message: "세션 없음" };
+      return { message: "Session not found" };
     }
 
     return detail;
@@ -90,7 +90,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
 
     if (!detail) {
       reply.code(404);
-      return { message: "Hook 없음" };
+      return { message: "Hook not found" };
     }
 
     return detail;
@@ -101,7 +101,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
 
     if (!detail) {
       reply.code(404);
-      return { message: "Skill 없음" };
+      return { message: "Skill not found" };
     }
 
     return detail;

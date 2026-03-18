@@ -9,7 +9,7 @@ interface AsyncPaneProps {
 
 export function AsyncPane({ loading, error, hasData = false, children }: AsyncPaneProps) {
   if (loading && !hasData) {
-    return <div className="state-box">데이터 로딩 중</div>;
+    return <div className="state-box">Loading data</div>;
   }
 
   if (error && !hasData) {

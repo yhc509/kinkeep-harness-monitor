@@ -57,7 +57,7 @@ export function App() {
   }, []);
 
   return (
-    <Suspense fallback={<div className="route-fallback">페이지 로딩 중</div>}>
+    <Suspense fallback={<div className="route-fallback">Loading page</div>}>
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />

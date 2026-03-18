@@ -50,7 +50,7 @@ function hasFreshData<T>(entry: ResourceCacheEntry<T> | undefined, staleTimeMs: 
 }
 
 function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "알 수 없는 오류";
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 function buildCachedState<T>(cacheKey: string): ResourceState<T> {

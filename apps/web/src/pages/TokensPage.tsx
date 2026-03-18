@@ -14,9 +14,9 @@ import { formatDateTime, formatDay, formatHour, formatNumber } from "../utils/fo
 
 const ranges = [7, 30, 90];
 const projectUnits: Array<{ value: TokenPeriodUnit; label: string }> = [
-  { value: "day", label: "일별" },
-  { value: "week", label: "주별" },
-  { value: "month", label: "월별" }
+  { value: "day", label: "Daily" },
+  { value: "week", label: "Weekly" },
+  { value: "month", label: "Monthly" }
 ];
 
 function formatChartValue(value: number | string | readonly (number | string)[] | undefined | null): string {
@@ -77,8 +77,8 @@ export function TokensPage() {
     <div className="page-stack">
       <section className="page-heading">
         <div>
-          <p className="eyebrow">토큰</p>
-          <h2>일별 사용량</h2>
+          <p className="eyebrow">TOKENS</p>
+          <h2>Daily usage</h2>
         </div>
         <div className="inline-actions">
           {tokens.data ? (
@@ -90,12 +90,12 @@ export function TokensPage() {
           {tokens.refreshing ? (
             <div className="page-chip loading-chip">
               <RefreshCw size={14} strokeWidth={2.2} />
-              <span>새로고침</span>
+              <span>Refreshing</span>
             </div>
           ) : null}
           <button className="primary-button" disabled={syncBusy} onClick={handleSync}>
             <RefreshCw size={14} strokeWidth={2.2} />
-            {syncBusy ? "동기화 중" : "지금 동기화"}
+            {syncBusy ? "Syncing" : "Sync now"}
           </button>
         </div>
       </section>
@@ -106,29 +106,29 @@ export function TokensPage() {
             <StatStrip
               items={[
                 {
-                  label: "오늘 토큰",
+                  label: "Tokens today",
                   value: formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0),
-                  meta: "총합",
+                  meta: "Total",
                   accent: "cool",
                   icon: Flame
                 },
                 {
-                  label: "7일 평균",
+                  label: "7-day average",
                   value: formatNumber(
                     Math.round(
                       trailingSevenDays.reduce((sum, point) => sum + point.totalTokens, 0)
                       / Math.max(trailingSevenDays.length, 1)
                     )
                   ),
-                  meta: "총합",
+                  meta: "Total",
                   icon: CalendarDays
                 }
               ]}
             />
 
             <Panel
-              title="일별 총 토큰"
-              subtitle={`${range}일`}
+              title="Daily total tokens"
+              subtitle={`${range} days`}
               icon={<Flame size={16} strokeWidth={2.2} />}
               actions={(
                 <>
@@ -139,13 +139,13 @@ export function TokensPage() {
                         className={item === range ? "segment active" : "segment"}
                         onClick={() => setRange(item)}
                       >
-                        {item}일
+                        {item}d
                       </button>
                     ))}
                   </div>
                   <span className="panel-badge">
                     <Clock3 size={13} strokeWidth={2.2} />
-                    오늘 {formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0)}
+                    Today {formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0)}
                   </span>
                 </>
               )}
@@ -166,11 +166,11 @@ export function TokensPage() {
                     />
                     <Tooltip
                       cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                      formatter={(value) => [formatChartValue(value), "총 토큰"]}
+                      formatter={(value) => [formatChartValue(value), "Total tokens"]}
                     />
                     <Bar
                       dataKey="totalTokens"
-                      name="총 토큰"
+                      name="Total tokens"
                       fill="var(--accent)"
                       radius={[8, 8, 0, 0]}
                       maxBarSize={44}
@@ -181,17 +181,17 @@ export function TokensPage() {
             </Panel>
 
             <Panel
-              title="모델 사용 비율"
-              subtitle={`${range}일 토큰 기준`}
+              title="Model usage share"
+              subtitle={`${range}-day token-based view`}
               icon={<CalendarDays size={16} strokeWidth={2.2} />}
               actions={(
                 <div className="panel-badges">
                   <span className="panel-badge">
                     <Flame size={13} strokeWidth={2.2} />
-                    총 {formatNumber(tokens.data.modelUsage.reduce((sum, item) => sum + item.totalTokens, 0))}
+                    Total {formatNumber(tokens.data.modelUsage.reduce((sum, item) => sum + item.totalTokens, 0))}
                   </span>
                   <span className="panel-badge muted-badge">
-                    모델 {formatNumber(tokens.data.modelUsage.length)}
+                    Models {formatNumber(tokens.data.modelUsage.length)}
                   </span>
                 </div>
               )}
@@ -202,7 +202,7 @@ export function TokensPage() {
             <AsyncPane loading={projectUsage.initialLoading} error={projectUsage.error} hasData={projectUsage.hasData}>
               {projectUsage.data ? (
                 <Panel
-                  title="프로젝트별 토큰 분포"
+                  title="Project token distribution"
                   subtitle={projectUsage.data.label}
                   icon={<CalendarDays size={16} strokeWidth={2.2} />}
                   actions={(
@@ -219,7 +219,7 @@ export function TokensPage() {
                         ))}
                       </div>
                       <div className="project-nav">
-                        <button className="ghost-button icon-button" onClick={() => handleProjectNavigate(-1)} aria-label="이전 기간">
+                        <button className="ghost-button icon-button" onClick={() => handleProjectNavigate(-1)} aria-label="Previous period">
                           <ChevronLeft size={15} strokeWidth={2.2} />
                         </button>
                         <span className="panel-badge">{projectUsage.data.label}</span>
@@ -227,12 +227,12 @@ export function TokensPage() {
                           className="ghost-button icon-button"
                           onClick={() => handleProjectNavigate(1)}
                           disabled={projectUsage.data.isCurrentPeriod}
-                          aria-label="다음 기간"
+                          aria-label="Next period"
                         >
                           <ChevronRight size={15} strokeWidth={2.2} />
                         </button>
                         <span className="panel-badge muted-badge">
-                          총 {formatNumber(projectUsage.data.totalTokens)}
+                          Total {formatNumber(projectUsage.data.totalTokens)}
                         </span>
                       </div>
                     </>
@@ -248,9 +248,9 @@ export function TokensPage() {
                 <summary className="fold-summary">
                   <div className="fold-summary-main">
                     <Clock3 size={15} strokeWidth={2.2} />
-                    <strong>최근 48시간</strong>
+                    <strong>Last 48 hours</strong>
                   </div>
-                  <span>시간별 합계</span>
+                  <span>Hourly totals</span>
                 </summary>
                 <div className="fold-content">
                 <div className="chart-wrap compact">
@@ -269,11 +269,11 @@ export function TokensPage() {
                       />
                       <Tooltip
                         cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                        formatter={(value) => [formatChartValue(value), "총 토큰"]}
+                        formatter={(value) => [formatChartValue(value), "Total tokens"]}
                       />
                       <Bar
                         dataKey="totalTokens"
-                        name="총 토큰"
+                        name="Total tokens"
                         fill="var(--accent-soft)"
                         radius={[6, 6, 0, 0]}
                         maxBarSize={18}
@@ -286,7 +286,7 @@ export function TokensPage() {
                     <article key={entry.hourBucket} className="snapshot-row">
                       <div>
                         <strong>{formatDateTime(entry.hourBucket)}</strong>
-                        <p>요청 {entry.requestCount}회</p>
+                        <p>{formatNumber(entry.requestCount)} requests</p>
                       </div>
                       <span>{formatNumber(entry.totalTokens)}</span>
                     </article>
@@ -299,9 +299,9 @@ export function TokensPage() {
                 <summary className="fold-summary">
                   <div className="fold-summary-main">
                     <RefreshCw size={15} strokeWidth={2.2} />
-                    <strong>동기화 로그</strong>
+                    <strong>Sync log</strong>
                   </div>
-                  <span>최근 20건</span>
+                  <span>Last 20 runs</span>
                 </summary>
                 <div className="fold-content">
                 <div className="run-list">

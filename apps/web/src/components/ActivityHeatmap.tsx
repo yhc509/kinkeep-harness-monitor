@@ -13,13 +13,13 @@ interface HeatmapCell {
   isPadding: boolean;
 }
 
-const monthFormatter = new Intl.DateTimeFormat("ko-KR", { month: "short" });
-const dayFormatter = new Intl.DateTimeFormat("ko-KR", {
+const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "short" });
+const dayFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
   day: "numeric"
 });
-const weekdayLabels = ["", "월", "", "수", "", "금", ""];
+const weekdayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
 
 export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
   const { weeks, monthLabels, activeDays } = useMemo(() => buildHeatmap(data), [data]);
@@ -57,7 +57,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
                     <div
                       key={cell.day}
                       className={`heatmap-cell level-${cell.level}${cell.isPadding ? " is-padding" : ""}`}
-                      title={`${dayFormatter.format(parseDayKey(cell.day))} · ${formatNumber(cell.value)} 토큰`}
+                      title={`${dayFormatter.format(parseDayKey(cell.day))} · ${formatNumber(cell.value)} tokens`}
                     />
                   ))}
                 </div>
@@ -68,13 +68,13 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
       </div>
 
       <div className="heatmap-legend">
-        <span>활성 {formatNumber(activeDays)}일</span>
+        <span>{formatNumber(activeDays)} active days</span>
         <div className="heatmap-legend-scale" aria-hidden="true">
-          <span>적음</span>
+          <span>Low</span>
           {[0, 1, 2, 3, 4].map((level) => (
             <span key={`legend-${level}`} className={`heatmap-cell level-${level}`} />
           ))}
-          <span>많음</span>
+          <span>High</span>
         </div>
       </div>
     </div>

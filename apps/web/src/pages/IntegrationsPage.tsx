@@ -85,20 +85,20 @@ export function IntegrationsPage() {
             {integrations.refreshing || refreshBusy ? (
               <div className="page-chip loading-chip">
                 <RefreshCw size={14} strokeWidth={2.2} />
-                <span>새로고침</span>
+                <span>Refreshing</span>
               </div>
             ) : null}
             {integrations.data.isStale ? (
               <div className="page-chip stale-chip">
                 <RefreshCw size={14} strokeWidth={2.2} />
-                <span>캐시 갱신 대기</span>
+                <span>Cache refresh pending</span>
               </div>
             ) : null}
           </div>
         ) : null}
         <button className="ghost-button" disabled={refreshBusy} onClick={handleRefresh}>
           <RefreshCw size={14} strokeWidth={2.2} />
-          {refreshBusy ? "새로고침 중" : "지금 새로고침"}
+          {refreshBusy ? "Refreshing" : "Refresh now"}
         </button>
       </section>
 
@@ -106,7 +106,7 @@ export function IntegrationsPage() {
         {integrations.data ? (
           <>
             <div className="two-column">
-              <Panel title="MCP" subtitle="최근 호출 흔적 포함" icon={<PlugZap size={16} strokeWidth={2.2} />}>
+              <Panel title="MCP" subtitle="Includes recent calls" icon={<PlugZap size={16} strokeWidth={2.2} />}>
                 <div className="integration-list dense-list">
                   {integrations.data.mcpServers.map((server) => (
                     <article key={server.name} className="integration-card">
@@ -114,14 +114,14 @@ export function IntegrationsPage() {
                         <h3>{server.name}</h3>
                         <span>{formatNumber(server.usageCount)} calls</span>
                       </header>
-                      <p>{server.url ?? "URL 없음"}</p>
-                      <small>{server.toolNames.join(", ") || "도구 호출 없음"}</small>
+                      <p>{server.url ?? "No URL"}</p>
+                      <small>{server.toolNames.join(", ") || "No tool calls"}</small>
                     </article>
                   ))}
                 </div>
               </Panel>
 
-              <Panel title="Hooks" subtitle="요약" icon={<Wrench size={16} strokeWidth={2.2} />}>
+              <Panel title="Hooks" subtitle="Summary" icon={<Wrench size={16} strokeWidth={2.2} />}>
                 <div className="integration-list dense-list">
                   {integrations.data.hooks.map((hook) => (
                     <button
@@ -142,7 +142,7 @@ export function IntegrationsPage() {
               </Panel>
             </div>
 
-            <Panel title="Skills" subtitle="이름" icon={<Settings2 size={16} strokeWidth={2.2} />}>
+            <Panel title="Skills" subtitle="Name" icon={<Settings2 size={16} strokeWidth={2.2} />}>
               <div className="compact-skill-grid">
                 {integrations.data.skills.map((skill) => (
                   <button

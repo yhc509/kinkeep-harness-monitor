@@ -19,8 +19,8 @@ export function DashboardPage() {
     <div className="page-stack">
       <section className="page-heading">
         <div>
-          <p className="eyebrow">대시보드</p>
-          <h2>대시보드</h2>
+          <p className="eyebrow">DASHBOARD</p>
+          <h2>Dashboard</h2>
         </div>
         {overview.data ? (
           <div className="page-chip-group">
@@ -31,7 +31,7 @@ export function DashboardPage() {
             {overview.refreshing ? (
               <div className="page-chip loading-chip">
                 <Activity size={14} strokeWidth={2.2} />
-                <span>새로고침</span>
+                <span>Refreshing</span>
               </div>
             ) : null}
           </div>
@@ -44,16 +44,16 @@ export function DashboardPage() {
             <StatStrip
               items={[
                 {
-                  label: "오늘 토큰",
+                  label: "Tokens today",
                   value: formatNumber(overview.data.stats.todayTokens.totalTokens),
-                  meta: "총합",
+                  meta: "Total",
                   accent: "cool",
                   icon: Flame
                 },
                 {
-                  label: "최근 동기화",
+                  label: "Last sync",
                   value: formatDateTime(overview.data.lastSyncedAt ?? overview.data.collector?.finishedAt ?? null),
-                  meta: overview.data.collector?.message ?? "동기화 이력 없음",
+                  meta: overview.data.collector?.message ?? "No sync history",
                   accent: "warm",
                   icon: Clock3,
                   extra: overview.data.collector ? <StatusPill status={overview.data.collector.status} /> : null
@@ -62,8 +62,8 @@ export function DashboardPage() {
             />
 
             <Panel
-              title="활동 히트맵"
-              subtitle="최근 1년"
+              title="Activity heatmap"
+              subtitle="Last 1 year"
               icon={<Activity size={16} strokeWidth={2.2} />}
             >
               <ActivityHeatmap data={overview.data.heatmapDaily} />

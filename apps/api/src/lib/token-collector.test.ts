@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("TokenCollectorService", () => {
-  it("rollout 로그의 token_count 이벤트를 일별/시간별 사용량으로 집계한다", () => {
+  it("aggregates token_count events in rollout logs into daily and hourly usage", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -45,7 +45,7 @@ describe("TokenCollectorService", () => {
     ]);
   });
 
-  it("turn_context가 바뀌면 이후 token_count를 해당 모델에 누적한다", () => {
+  it("attributes later token_count events to the model after turn_context changes", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -134,7 +134,7 @@ describe("TokenCollectorService", () => {
     ]);
   });
 
-  it("모델명이 없는 오래된 로그는 provider 기준 모델 미상으로 묶는다", () => {
+  it("groups older logs without a model name under provider-specific Unknown Model", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -147,13 +147,13 @@ describe("TokenCollectorService", () => {
 
     const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
     expect(tokens.modelUsage.some((entry) => (
-      entry.modelName === "모델 미상"
+      entry.modelName === "Unknown Model"
       && entry.modelProvider === "openai"
       && entry.totalTokens === 44
     ))).toBe(true);
   });
 
-  it("모델이 많으면 상위 6개와 기타로 묶는다", () => {
+  it("groups many models into top 6 plus Other", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -176,13 +176,13 @@ describe("TokenCollectorService", () => {
     const tokens = collector.getTokens(1, new Date("2026-03-14T23:30:00+09:00"));
     expect(tokens.modelUsage).toHaveLength(7);
     expect(tokens.modelUsage.at(-1)).toEqual({
-      modelName: "기타",
+      modelName: "Other",
       modelProvider: null,
       totalTokens: 30
     });
   });
 
-  it("rollout 파일이 바뀌면 다음 동기화에서 다시 집계한다", () => {
+  it("re-indexes a rollout on the next sync when the file changes", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -237,7 +237,7 @@ describe("TokenCollectorService", () => {
     expect(tokens.hourly[1]?.totalTokens).toBe(200);
   });
 
-  it("last_token_usage가 없는 오래된 이벤트는 total_token_usage 차이로 보정한다", () => {
+  it("falls back to total_token_usage deltas when last_token_usage is missing in older events", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -281,7 +281,7 @@ describe("TokenCollectorService", () => {
     expect(tokens.hourly[1]?.totalTokens).toBe(160);
   });
 
-  it("프로젝트별 일간 사용량을 프로젝트 기준으로 합산한다", () => {
+  it("aggregates daily project usage by project", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -309,7 +309,7 @@ describe("TokenCollectorService", () => {
     });
   });
 
-  it("session_meta가 없어도 threads의 cwd로 프로젝트를 복구한다", () => {
+  it("recovers the project from thread cwd even when session_meta is missing", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -335,7 +335,7 @@ describe("TokenCollectorService", () => {
     });
   });
 
-  it("rollout과 threads 모두 cwd가 없으면 마지막에만 알 수 없음으로 집계한다", () => {
+  it("uses Unknown only when both rollout and thread cwd are missing", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -349,12 +349,12 @@ describe("TokenCollectorService", () => {
     const projectUsage = collector.getProjectTokenUsage("day", "2026-03-15", new Date("2026-03-15T10:00:00+09:00"));
     expect(projectUsage.projects[0]).toMatchObject({
       projectId: "__unknown__",
-      projectName: "알 수 없음",
+      projectName: "Unknown",
       totalTokens: 55
     });
   });
 
-  it("주간 집계는 월요일 시작으로 정규화하고 상위 12개만 노출한다", () => {
+  it("normalizes weekly aggregation to Monday starts and exposes only the top 12 projects", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
 
@@ -383,7 +383,7 @@ describe("TokenCollectorService", () => {
     expect(projectUsage.projects).toHaveLength(13);
     expect(projectUsage.projects.at(-1)).toMatchObject({
       projectId: "__other__",
-      projectName: "기타",
+      projectName: "Other",
       totalTokens: 88
     });
   });
@@ -485,11 +485,11 @@ function insertThreadRow(
     "cli",
     "openai",
     input.cwd,
-    "복구 세션",
+    "Recovered session",
     "danger-full-access",
     "never",
     55,
-    "복구 테스트",
+    "Recovery test",
     null,
     null,
     "enabled"

@@ -1,9 +1,9 @@
 export function formatNumber(value: number): string {
-  return value.toLocaleString("ko-KR");
+  return value.toLocaleString("en-US");
 }
 
 export function formatShortNumber(value: number): string {
-  return new Intl.NumberFormat("ko-KR", {
+  return new Intl.NumberFormat("en-US", {
     notation: "compact",
     maximumFractionDigits: 1
   }).format(value);
@@ -19,7 +19,7 @@ export function formatDateTime(value: string | null): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -33,7 +33,7 @@ export function formatDay(value: string): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "numeric",
     day: "numeric"
   }).format(date);
@@ -45,7 +45,7 @@ export function formatHour(value: string): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
@@ -53,12 +53,12 @@ export function formatHour(value: string): string {
 
 export function statusLabel(status: "success" | "warning" | "failure"): string {
   if (status === "success") {
-    return "정상";
+    return "Healthy";
   }
 
   if (status === "warning") {
-    return "경고";
+    return "Warning";
   }
 
-  return "실패";
+  return "Failed";
 }

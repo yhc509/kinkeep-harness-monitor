@@ -20,7 +20,7 @@ export function createProviderRegistry(config: AppConfig): ProviderRegistry {
         return activeProvider;
       }
 
-      throw new Error(`지원되지 않는 provider: ${config.activeProviderId}`);
+      throw new Error(`Unsupported provider: ${config.activeProviderId}`);
     }
   };
 }

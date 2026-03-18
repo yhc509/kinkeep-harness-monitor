@@ -576,7 +576,7 @@ export class CodexDataService implements MonitorProviderAdapter {
         ON CONFLICT(cache_key) DO UPDATE SET
           status = excluded.status,
           message = excluded.message
-      `).run(error instanceof Error ? error.message : "알 수 없는 오류");
+      `).run(error instanceof Error ? error.message : "Unknown error");
       throw error;
     } finally {
       database.close();
@@ -980,8 +980,8 @@ function parseRolloutTimeline(rolloutPath: string): { timeline: SessionTimelineI
         timestamp: toLocalDateTime(new Date()) ?? "",
         kind: "event",
         role: null,
-        title: "세션 파일 없음",
-        body: `rollout 파일 없음: ${rolloutPath}`,
+        title: "Missing session file",
+        body: `Missing rollout file: ${rolloutPath}`,
         toolName: null,
         metadata: {}
       }],
@@ -1018,7 +1018,7 @@ function parseRolloutTimeline(rolloutPath: string): { timeline: SessionTimelineI
         timestamp,
         kind: "session_meta",
         role: null,
-        title: "세션 메타",
+        title: "Session metadata",
         body: stringifySnippet({
           cwd: payload.cwd,
           cliVersion: payload.cli_version,
@@ -1129,8 +1129,8 @@ function parseRolloutTimeline(rolloutPath: string): { timeline: SessionTimelineI
           timestamp,
           kind: "token_count",
           role: null,
-          title: "토큰 누적",
-          body: `총 ${Number(total.total_tokens ?? 0).toLocaleString()} 토큰`,
+          title: "Token totals",
+          body: `Total ${Number(total.total_tokens ?? 0).toLocaleString("en-US")} tokens`,
           toolName: null,
           metadata: {
             input: String(total.input_tokens ?? ""),
@@ -1223,7 +1223,7 @@ function resolveLatestSqlite(baseDir: string, pattern: RegExp): string {
     .sort((left, right) => extractNumericSuffix(right) - extractNumericSuffix(left));
 
   if (files.length === 0) {
-    throw new Error(`state sqlite 파일 없음: ${baseDir}`);
+    throw new Error(`State sqlite file not found: ${baseDir}`);
   }
 
   return path.join(baseDir, files[0]);
@@ -1389,13 +1389,13 @@ function parseMcpUsageRollout(rolloutPath: string): Map<string, Map<string, numb
 
 function buildMcpUsageRefreshMessage(preparation: McpUsageSyncPreparation): string {
   if (preparation.changedFiles.length === 0 && preparation.deletedPaths.length === 0) {
-    return "변경 없음";
+    return "No changes";
   }
 
   return [
-    `전체 ${preparation.totalRollouts}개`,
-    `갱신 ${preparation.changedFiles.length}개`,
-    `삭제 ${preparation.deletedPaths.length}개`
+    `total ${preparation.totalRollouts}`,
+    `updated ${preparation.changedFiles.length}`,
+    `deleted ${preparation.deletedPaths.length}`
   ].join(" · ");
 }
 
