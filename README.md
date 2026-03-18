@@ -6,10 +6,6 @@ The project currently runs on the `Codex` provider. The data layer is already sp
 
 ## Screenshots
 
-### Sessions
-
-![Sessions](docs/screenshots/sessions.png)
-
 ### Tokens
 
 ![Tokens](docs/screenshots/tokens.png)
