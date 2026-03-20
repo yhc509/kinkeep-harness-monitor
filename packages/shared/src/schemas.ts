@@ -22,6 +22,7 @@ export const subagentSummarySchema = z.object({
 
 export const sessionListItemSchema = z.object({
   id: z.string(),
+  provider: z.enum(["codex", "claude-code"]).optional(),
   title: z.string(),
   cwd: z.string(),
   projectId: z.string(),
@@ -120,6 +121,12 @@ export const dailyTokenPointSchema = z.object({
   outputTokens: z.number()
 });
 
+export const dailyProviderTokensSchema = z.object({
+  day: z.string(),
+  codexTokens: z.number(),
+  claudeCodeTokens: z.number()
+});
+
 export const tokenSyncStatsSchema = z.object({
   totalRollouts: z.number(),
   updatedRollouts: z.number(),
@@ -199,7 +206,7 @@ export const skillSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
-  source: z.enum(["codex", "agents"])
+  source: z.enum(["codex", "agents", "claude-code"])
 });
 
 export const hookSummarySchema = z.object({
@@ -233,6 +240,7 @@ export const tokensResponseSchema = z.object({
   rangeDays: z.number(),
   currentHourTokens: tokenBreakdownSchema,
   daily: z.array(dailyTokenPointSchema),
+  dailyProviderTokens: z.array(dailyProviderTokensSchema),
   hourly: z.array(hourlyTokenUsageSchema),
   modelUsage: z.array(modelTokenUsageItemSchema),
   collectorRuns: z.array(collectorRunSchema),
@@ -265,6 +273,7 @@ export type CollectorRun = z.infer<typeof collectorRunSchema>;
 export type HourlyTokenUsage = z.infer<typeof hourlyTokenUsageSchema>;
 export type TokenBreakdown = z.infer<typeof tokenBreakdownSchema>;
 export type DailyTokenPoint = z.infer<typeof dailyTokenPointSchema>;
+export type DailyProviderTokens = z.infer<typeof dailyProviderTokensSchema>;
 export type TokenSyncStats = z.infer<typeof tokenSyncStatsSchema>;
 export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;
 export type ProjectTokenUsageItem = z.infer<typeof projectTokenUsageItemSchema>;

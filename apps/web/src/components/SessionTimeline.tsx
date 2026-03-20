@@ -1,5 +1,6 @@
 import { Bot, Clock3, PlugZap, Send, TerminalSquare, Wrench } from "lucide-react";
 import { formatDateTime } from "../utils/format";
+import { getProviderLabel, getProviderThemeClassName, type ProviderId } from "../utils/providerTheme";
 
 interface TimelineInput {
   id: string;
@@ -16,17 +17,26 @@ interface SessionTimelineProps {
   items: TimelineInput[];
   showActivity: boolean;
   showTechnical: boolean;
+  provider?: ProviderId;
 }
 
 const conversationKinds = new Set(["user_message", "assistant_message"]);
 const hiddenActivityTools = new Set(["apply_patch", "exec_command", "write_stdin"]);
 
-export function SessionTimeline({ items, showActivity, showTechnical }: SessionTimelineProps) {
+export function SessionTimeline({ items, showActivity, showTechnical, provider }: SessionTimelineProps) {
   const visibleItems = items.filter((item) => isConversationItem(item) || (showActivity && isActivityItem(item)));
   const technicalItems = items.filter((item) => !isConversationItem(item) && !(showActivity && isActivityItem(item)));
+  const providerClass = provider ? getProviderThemeClassName(provider) : null;
 
   return (
     <div className="conversation-stack">
+      {providerClass ? (
+        <div className="timeline-provider-row">
+          <span className="timeline-provider-label">Timeline</span>
+          <span className={`provider-badge ${providerClass}`}>{getProviderLabel(provider)}</span>
+        </div>
+      ) : null}
+
       {visibleItems.length > 0 ? (
         <div className="conversation-feed">
           {visibleItems.map((item) => {

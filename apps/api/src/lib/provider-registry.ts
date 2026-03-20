@@ -1,26 +1,44 @@
 import type { AppConfig } from "../config";
+import { ClaudeCodeDataService } from "./claude-code-service";
 import { CodexDataService } from "./codex-service";
 import type { MonitorProviderAdapter } from "./provider-adapter";
 
 export interface ProviderRegistry {
   getActiveProvider(): MonitorProviderAdapter;
+  getProviders(): MonitorProviderAdapter[];
 }
 
 export function createProviderRegistry(config: AppConfig): ProviderRegistry {
-  let activeProvider: MonitorProviderAdapter | null = null;
+  let providers: MonitorProviderAdapter[] | null = null;
 
   return {
     getActiveProvider() {
-      if (activeProvider) {
-        return activeProvider;
+      const [provider] = this.getProviders();
+      if (!provider) {
+        throw new Error(`No supported providers are available for: ${config.activeProviderIds.join(", ")}`);
       }
 
-      if (config.activeProviderId === "codex") {
-        activeProvider = new CodexDataService(config);
-        return activeProvider;
+      return provider;
+    },
+    getProviders() {
+      if (providers) {
+        return providers;
       }
 
-      throw new Error(`Unsupported provider: ${config.activeProviderId}`);
+      providers = config.activeProviderIds.flatMap<MonitorProviderAdapter>((providerId) => {
+        if (providerId === "codex") {
+          return [new CodexDataService(config)];
+        }
+
+        if (providerId === "claude-code") {
+          return [new ClaudeCodeDataService(config)];
+        }
+
+        console.warn(`[provider-registry] Skipping unsupported provider until implementation is ready: ${providerId}`);
+        return [];
+      });
+
+      return providers;
     }
   };
 }

@@ -17,6 +17,17 @@ describe("API server", () => {
 
     const app = await buildServer(fixture.config);
 
+    const health = await app.inject({
+      method: "GET",
+      url: "/api/health"
+    });
+    expect(health.statusCode).toBe(200);
+    expect(health.json()).toMatchObject({
+      ok: true,
+      provider: "codex",
+      providers: ["codex"]
+    });
+
     const snapshot = await app.inject({
       method: "POST",
       url: "/api/tokens/snapshot"
@@ -42,6 +53,7 @@ describe("API server", () => {
       url: "/api/sessions/thread-1"
     });
     expect(session.statusCode).toBe(200);
+    expect(session.json().provider).toBe("codex");
     expect(session.json().projectName).toBe("demo-project");
     expect(session.json().subagents).toHaveLength(2);
 
@@ -73,6 +85,8 @@ describe("API server", () => {
     });
     expect(tokens.statusCode).toBe(200);
     expect(tokens.json().daily.some((entry: { totalTokens: number }) => entry.totalTokens === 140)).toBe(true);
+    expect(tokens.json().dailyProviderTokens).toBeDefined();
+    expect(tokens.json().dailyProviderTokens.some((entry: { codexTokens: number }) => entry.codexTokens === 140)).toBe(true);
     expect(tokens.json().modelUsage).toEqual([
       {
         modelName: "gpt-5.4",

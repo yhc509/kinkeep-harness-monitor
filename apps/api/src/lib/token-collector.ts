@@ -21,7 +21,7 @@ import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
 
-const CACHE_PARSE_VERSION = "4";
+const CACHE_PARSE_VERSION = "5";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
 const PROJECT_USAGE_LIMIT = 12;
@@ -30,6 +30,12 @@ const UNKNOWN_PROJECT_ID = "__unknown__";
 const OTHER_PROJECT_ID = "__other__";
 const OTHER_MODEL_NAME = "Other";
 const UNKNOWN_MODEL_NAME = "Unknown Model";
+const CLAUDE_CODE_STATS_ROLLOUT_PATH = "__claude-code-stats__";
+const CLAUDE_CODE_STATS_PROJECT_ID = "__claude-code__";
+const CLAUDE_CODE_STATS_PROJECT_NAME = "Claude Code";
+const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v1";
+const CLAUDE_CODE_STATS_MODEL_PROVIDER = "anthropic";
+const SYNTHETIC_ROLLOUT_PATHS = new Set([CLAUDE_CODE_STATS_ROLLOUT_PATH]);
 
 export interface SnapshotResult extends TokenSyncResult {}
 
@@ -113,6 +119,12 @@ interface DailyUsageRow {
   output_tokens: number;
 }
 
+interface ProviderDailyUsageRow {
+  day: string;
+  provider: string;
+  total_tokens: number;
+}
+
 interface ProjectUsageRow {
   project_id: string;
   project_name: string;
@@ -135,12 +147,21 @@ interface ModelUsageRow {
   total_tokens: number;
 }
 
+interface StatsCacheDailyUsage {
+  hourBucket: string;
+  totalTokens: number;
+  modelUsage: Array<{
+    modelName: string;
+    totalTokens: number;
+  }>;
+}
+
 export class TokenCollectorService {
   private usageRefreshPromise: Promise<SnapshotResult> | null = null;
 
   constructor(
     private readonly config: AppConfig,
-    private readonly sessionLogProvider: SessionLogProvider
+    private readonly sessionLogProviders: SessionLogProvider[]
   ) {}
 
   ensureSchema(): void {
@@ -204,6 +225,115 @@ export class TokenCollectorService {
     ensureColumn(database, "rollout_hourly_usage", "project_name", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_path", "TEXT NOT NULL DEFAULT ''");
     database.close();
+  }
+
+  importStatsCacheUsage(statsCachePath: string): void {
+    this.ensureSchema();
+
+    let stats: fs.Stats;
+    let text: string;
+
+    try {
+      stats = fs.statSync(statsCachePath);
+      text = fs.readFileSync(statsCachePath, "utf8");
+    } catch (error) {
+      if (isFileMissingError(error)) {
+        return;
+      }
+
+      throw error instanceof Error ? error : new Error("Failed to read Claude Code stats cache");
+    }
+
+    const parsed = JSON.parse(text) as unknown;
+    const dailyUsage = parseStatsCacheDailyUsage(parsed);
+    const database = this.openMonitorDb();
+
+    try {
+      database.exec("BEGIN");
+      database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(CLAUDE_CODE_STATS_ROLLOUT_PATH);
+      database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(CLAUDE_CODE_STATS_ROLLOUT_PATH);
+
+      const insertUsage = database.prepare(`
+        INSERT OR REPLACE INTO rollout_hourly_usage (
+          rollout_path,
+          hour_bucket,
+          project_id,
+          project_name,
+          project_path,
+          total_tokens,
+          input_tokens,
+          cached_input_tokens,
+          output_tokens,
+          reasoning_output_tokens,
+          request_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertModelUsage = database.prepare(`
+        INSERT OR REPLACE INTO rollout_hourly_model_usage (
+          rollout_path,
+          hour_bucket,
+          model_name,
+          model_provider,
+          total_tokens,
+          request_count
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const entry of dailyUsage) {
+        insertUsage.run(
+          CLAUDE_CODE_STATS_ROLLOUT_PATH,
+          entry.hourBucket,
+          CLAUDE_CODE_STATS_PROJECT_ID,
+          CLAUDE_CODE_STATS_PROJECT_NAME,
+          "",
+          entry.totalTokens,
+          0,
+          0,
+          0,
+          0,
+          0
+        );
+
+        for (const modelUsage of entry.modelUsage) {
+          insertModelUsage.run(
+            CLAUDE_CODE_STATS_ROLLOUT_PATH,
+            entry.hourBucket,
+            modelUsage.modelName,
+            CLAUDE_CODE_STATS_MODEL_PROVIDER,
+            modelUsage.totalTokens,
+            0
+          );
+        }
+      }
+
+      database.prepare(`
+        INSERT OR REPLACE INTO rollout_index_state (
+          rollout_path,
+          file_size,
+          mtime_ms,
+          indexed_at,
+          parse_version
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        CLAUDE_CODE_STATS_ROLLOUT_PATH,
+        stats.size,
+        Math.trunc(stats.mtimeMs),
+        toLocalDateTime(new Date()) ?? "",
+        CLAUDE_CODE_STATS_PARSE_VERSION
+      );
+
+      database.exec("COMMIT");
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Ignore rollback failures so we can still surface the original error.
+      }
+
+      throw error instanceof Error ? error : new Error("Failed to import Claude Code stats cache");
+    } finally {
+      database.close();
+    }
   }
 
   captureSnapshot(now = new Date()): SnapshotResult {
@@ -274,6 +404,29 @@ export class TokenCollectorService {
       ORDER BY day ASC
     `).all(formatHourBucket(startDate)) as unknown as DailyUsageRow[];
 
+    const providerDailyRows = database.prepare(`
+      SELECT
+        day,
+        provider,
+        SUM(total_tokens) AS total_tokens
+      FROM (
+        SELECT
+          substr(hour_bucket, 1, 10) AS day,
+          total_tokens,
+          CASE
+            WHEN rollout_path = ? OR rollout_path LIKE '%/.claude/%' THEN 'claude-code'
+            ELSE 'codex'
+          END AS provider
+        FROM rollout_hourly_usage
+        WHERE hour_bucket >= ?
+      )
+      GROUP BY day, provider
+      ORDER BY day ASC, provider ASC
+    `).all(
+      CLAUDE_CODE_STATS_ROLLOUT_PATH,
+      formatHourBucket(startDate)
+    ) as unknown as ProviderDailyUsageRow[];
+
     const hourlyRows = database.prepare(`
       SELECT
         hour_bucket,
@@ -342,6 +495,22 @@ export class TokenCollectorService {
       daily.push(dailyMap.get(dayKey) ?? emptyDailyTokenPoint(dayKey));
     }
 
+    const providerDailyMap = new Map<string, { codexTokens: number; claudeCodeTokens: number }>();
+    for (const row of providerDailyRows) {
+      const entry = providerDailyMap.get(row.day) ?? { codexTokens: 0, claudeCodeTokens: 0 };
+      if (row.provider === "claude-code") {
+        entry.claudeCodeTokens = row.total_tokens;
+      } else {
+        entry.codexTokens = row.total_tokens;
+      }
+      providerDailyMap.set(row.day, entry);
+    }
+
+    const dailyProviderTokens = daily.map((point) => ({
+      day: point.day,
+      ...(providerDailyMap.get(point.day) ?? { codexTokens: 0, claudeCodeTokens: 0 })
+    }));
+
     const hourly = hourlyRows.map(mapHourlyUsageRow);
     const currentHour = hourly.find((entry) => entry.hourBucket === currentHourBucket);
     const currentHourTokens = currentHour
@@ -353,6 +522,7 @@ export class TokenCollectorService {
       rangeDays,
       currentHourTokens,
       daily,
+      dailyProviderTokens,
       hourly,
       modelUsage,
       collectorRuns: runRows.map(mapCollectorRunRow),
@@ -459,7 +629,10 @@ export class TokenCollectorService {
   }
 
   private prepareSyncState(): SyncPreparation {
-    const files = scanRolloutFiles(this.sessionLogProvider.getSessionRoot());
+    const files: RolloutFileState[] = [];
+    for (const provider of this.sessionLogProviders) {
+      files.push(...scanRolloutFiles(provider.getSessionRoot()));
+    }
     const database = this.openMonitorDb();
     const indexedRows = database.prepare(`
       SELECT
@@ -499,7 +672,7 @@ export class TokenCollectorService {
 
     const deletedPaths = indexedRows
       .map((row) => row.rollout_path)
-      .filter((rolloutPath) => !currentPaths.has(rolloutPath));
+      .filter((rolloutPath) => !currentPaths.has(rolloutPath) && !isSyntheticRolloutPath(rolloutPath));
 
     return {
       totalRollouts: files.length,
@@ -531,7 +704,10 @@ export class TokenCollectorService {
       }
 
       for (const file of preparation.changedFiles) {
-        const parsed = parseRolloutUsage(file.rolloutPath, this.sessionLogProvider);
+        const provider = this.findProviderForPath(file.rolloutPath);
+        const parsed = isClaudeCodeRolloutPath(file.rolloutPath)
+          ? parseClaudeCodeTranscriptUsage(file.rolloutPath, provider)
+          : parseRolloutUsage(file.rolloutPath, provider);
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(file.rolloutPath);
         database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(file.rolloutPath);
 
@@ -655,6 +831,16 @@ export class TokenCollectorService {
 
   private openMonitorDb(): DatabaseSync {
     return new DatabaseSync(this.config.monitorDbPath);
+  }
+
+  private findProviderForPath(rolloutPath: string): SessionLogProvider {
+    for (const provider of this.sessionLogProviders) {
+      if (rolloutPath.startsWith(provider.getSessionRoot())) {
+        return provider;
+      }
+    }
+
+    return this.sessionLogProviders[0]!;
   }
 }
 
@@ -816,6 +1002,107 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
   };
 }
 
+function parseClaudeCodeTranscriptUsage(
+  rolloutPath: string,
+  sessionLogProvider: SessionLogProvider
+): ParsedRolloutUsage {
+  const text = fs.readFileSync(rolloutPath, "utf8");
+  const lines = text.split("\n");
+  const hourlyUsage = new Map<string, UsageAccumulator>();
+  const hourlyModelUsage = new Map<string, ModelUsageAccumulator>();
+  let project: ResolvedProjectInfo | null = sessionLogProvider.resolveProjectInfoForRolloutPath(rolloutPath);
+  let tokenEvents = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const type = readOptionalString(parsed, "type") ?? "";
+    if (type === "user") {
+      const cwd = readOptionalString(parsed, "cwd");
+      if (cwd) {
+        project = resolveProjectInfoFromCwd(cwd);
+      }
+      continue;
+    }
+
+    if (type !== "assistant") {
+      continue;
+    }
+
+    const message = isRecord(parsed.message) ? parsed.message : null;
+    if (!message) {
+      continue;
+    }
+
+    const usage = isRecord(message.usage) ? message.usage : null;
+    if (!usage) {
+      continue;
+    }
+
+    const modelName = readOptionalString(message, "model");
+    if (modelName === "<synthetic>") {
+      continue;
+    }
+
+    const rawTimestamp = readOptionalString(parsed, "timestamp");
+    if (!rawTimestamp) {
+      continue;
+    }
+
+    const timestamp = new Date(rawTimestamp);
+    if (Number.isNaN(timestamp.getTime())) {
+      continue;
+    }
+
+    const inputTokens = readUsageNumber(usage, "input_tokens");
+    const outputTokens = readUsageNumber(usage, "output_tokens");
+    const cacheCreationTokens = readUsageNumber(usage, "cache_creation_input_tokens");
+    const cacheReadTokens = readUsageNumber(usage, "cache_read_input_tokens");
+    const cachedInputTokens = cacheCreationTokens + cacheReadTokens;
+    const totalTokens = inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens;
+
+    if (totalTokens <= 0) {
+      continue;
+    }
+
+    tokenEvents += 1;
+
+    const hourBucket = formatHourBucket(timestamp);
+    const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator();
+    accumulator.totalTokens += totalTokens;
+    accumulator.inputTokens += inputTokens;
+    accumulator.cachedInputTokens += cachedInputTokens;
+    accumulator.outputTokens += outputTokens;
+    accumulator.requestCount += 1;
+    hourlyUsage.set(hourBucket, accumulator);
+
+    const modelProvider = "anthropic";
+    const modelUsageKey = createModelUsageKey(hourBucket, modelName, modelProvider);
+    const modelUsage = hourlyModelUsage.get(modelUsageKey)
+      ?? createEmptyModelUsageAccumulator(hourBucket, modelName, modelProvider);
+    modelUsage.totalTokens += totalTokens;
+    modelUsage.requestCount += 1;
+    hourlyModelUsage.set(modelUsageKey, modelUsage);
+  }
+
+  return {
+    project,
+    hourlyUsage,
+    hourlyModelUsage,
+    tokenEvents
+  };
+}
+
 function parseUsageBlock(value: unknown): ParsedUsageBlock {
   const record = isRecord(value) ? value : {};
   return {
@@ -825,6 +1112,11 @@ function parseUsageBlock(value: unknown): ParsedUsageBlock {
     outputTokens: readOptionalNumber(record, "output_tokens"),
     reasoningOutputTokens: readOptionalNumber(record, "reasoning_output_tokens")
   };
+}
+
+function readUsageNumber(usage: Record<string, unknown>, key: string): number {
+  const value = usage[key];
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 function resolveUsageDelta(
@@ -1010,6 +1302,87 @@ function createModelUsageKey(hourBucket: string, modelName: string | null, model
   return `${hourBucket}\u0000${modelName?.trim() || UNKNOWN_MODEL_NAME}\u0000${normalizeProvider(modelProvider) ?? ""}`;
 }
 
+function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
+  const record = isRecord(value) ? value : {};
+  const dailyModelTokens = Array.isArray(record.dailyModelTokens) ? record.dailyModelTokens : [];
+  const dailyUsage: StatsCacheDailyUsage[] = [];
+
+  for (const entry of dailyModelTokens) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const hourBucket = parseStatsCacheHourBucket(entry.date);
+    if (!hourBucket) {
+      continue;
+    }
+
+    const tokensByModel = isRecord(entry.tokensByModel) ? entry.tokensByModel : {};
+    const modelUsage = Object.entries(tokensByModel)
+      .flatMap(([modelName, totalTokens]) => {
+        const normalizedName = modelName.trim();
+        const normalizedTotal = normalizeStatsTokenCount(totalTokens);
+        if (!normalizedName || normalizedTotal === null) {
+          return [];
+        }
+
+        return [{
+          modelName: normalizedName,
+          totalTokens: normalizedTotal
+        }];
+      })
+      .sort((left, right) => left.modelName.localeCompare(right.modelName));
+
+    dailyUsage.push({
+      hourBucket,
+      totalTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      modelUsage
+    });
+  }
+
+  dailyUsage.sort((left, right) => left.hourBucket.localeCompare(right.hourBucket));
+  return dailyUsage;
+}
+
+function parseStatsCacheHourBucket(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 0, 0, 0, 0);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return formatHourBucket(date);
+}
+
+function normalizeStatsTokenCount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
+  }
+
+  return null;
+}
+
+function isSyntheticRolloutPath(rolloutPath: string): boolean {
+  return SYNTHETIC_ROLLOUT_PATHS.has(rolloutPath);
+}
+
+function isClaudeCodeRolloutPath(rolloutPath: string): boolean {
+  return isSyntheticRolloutPath(rolloutPath) || rolloutPath.includes("/.claude/");
+}
+
 function parseDayKey(value: string | undefined, fallback: Date): Date {
   if (!value) {
     return startOfLocalDay(fallback);
@@ -1118,6 +1491,14 @@ function readOptionalString(record: Record<string, unknown>, key: string): strin
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isFileMissingError(error: unknown): error is NodeJS.ErrnoException {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
 function scanRolloutFiles(baseDir: string): RolloutFileState[] {

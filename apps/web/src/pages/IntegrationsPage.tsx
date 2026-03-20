@@ -12,6 +12,7 @@ import { DetailModal } from "../components/DetailModal";
 import { Panel } from "../components/Panel";
 import { useApiResource } from "../hooks/useApiResource";
 import { formatDateTime, formatNumber } from "../utils/format";
+import { getSourceThemeClassName, getSourceThemeLabel } from "../utils/providerTheme";
 
 type DetailTarget =
   | { type: "hook"; id: string }
@@ -123,21 +124,29 @@ export function IntegrationsPage() {
 
               <Panel title="Hooks" subtitle="Summary" icon={<Wrench size={16} strokeWidth={2.2} />}>
                 <div className="integration-list dense-list">
-                  {integrations.data.hooks.map((hook) => (
-                    <button
-                      key={hook.id}
-                      type="button"
-                      className="detail-row integration-card"
-                      onClick={() => setDetailTarget({ type: "hook", id: hook.id })}
-                    >
-                      <header>
-                        <h3>{hook.name}</h3>
-                        <span>{hook.kind}</span>
-                      </header>
-                      <p>{hook.preview}</p>
-                      <small>{hook.source}</small>
-                    </button>
-                  ))}
+                  {integrations.data.hooks.map((hook) => {
+                    const sourceTheme = getSourceThemeClassName(hook.source);
+                    const providerCardClass = sourceTheme && sourceTheme !== "agents" ? ` provider-card provider-${sourceTheme}` : "";
+
+                    return (
+                      <button
+                        key={hook.id}
+                        type="button"
+                        className={`detail-row integration-card${providerCardClass}`}
+                        onClick={() => setDetailTarget({ type: "hook", id: hook.id })}
+                      >
+                        <header>
+                          <h3>{hook.name}</h3>
+                          <div className="integration-card-tags">
+                            <span>{hook.kind}</span>
+                            {sourceTheme ? <span className={`source-pill ${sourceTheme}`}>{getSourceThemeLabel(sourceTheme)}</span> : null}
+                          </div>
+                        </header>
+                        <p>{hook.preview}</p>
+                        <small>{hook.source}</small>
+                      </button>
+                    );
+                  })}
                 </div>
               </Panel>
             </div>
@@ -153,7 +162,7 @@ export function IntegrationsPage() {
                   >
                     <div className="skill-name-row-header">
                       <h3>{skill.name}</h3>
-                      <span className={`skill-source ${skill.source}`}>{skill.source}</span>
+                      <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
                     </div>
                   </button>
                 ))}
@@ -172,12 +181,19 @@ export function IntegrationsPage() {
         <AsyncPane loading={hookDetail.initialLoading} error={hookDetail.error} hasData={hookDetail.hasData}>
           {hookDetail.data ? (
             <div className="modal-stack">
-              <div className="page-chip-group">
-                <div className="page-chip">
-                  <Wrench size={14} strokeWidth={2.2} />
-                  <span>{hookDetail.data.kind}</span>
-                </div>
-              </div>
+              {(() => {
+                const sourceTheme = getSourceThemeClassName(hookDetail.data.source);
+
+                return (
+                  <div className="page-chip-group">
+                    <div className="page-chip">
+                      <Wrench size={14} strokeWidth={2.2} />
+                      <span>{hookDetail.data.kind}</span>
+                    </div>
+                    {sourceTheme ? <span className={`source-pill ${sourceTheme}`}>{getSourceThemeLabel(sourceTheme)}</span> : null}
+                  </div>
+                );
+              })()}
               <pre className="modal-pre">{hookDetail.data.command}</pre>
             </div>
           ) : null}
@@ -194,10 +210,10 @@ export function IntegrationsPage() {
           {skillDetail.data ? (
             <div className="modal-stack">
               <div className="page-chip-group">
-                <div className="page-chip">
+                <span className={`source-pill ${skillDetail.data.source}`}>
                   <Settings2 size={14} strokeWidth={2.2} />
-                  <span>{skillDetail.data.source}</span>
-                </div>
+                  <span>{getSourceThemeLabel(skillDetail.data.source)}</span>
+                </span>
               </div>
               <pre className="modal-pre">{skillDetail.data.content}</pre>
             </div>

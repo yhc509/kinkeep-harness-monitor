@@ -914,6 +914,7 @@ function compareSessions(
 function mapThreadRow(row: ThreadRow, project: ProjectInfo, sourceInfo: SourceInfo): SessionListItem {
   return {
     id: row.id,
+    provider: "codex",
     title: row.title,
     cwd: row.cwd,
     projectId: project.projectId,

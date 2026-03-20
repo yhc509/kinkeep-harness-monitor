@@ -422,7 +422,10 @@ description: Review skill from agents
     monitorDbPath: path.join(rootDir, "data", "monitor.sqlite"),
     webDistPath: path.join(rootDir, "apps", "web", "dist"),
     timezone: "Asia/Seoul",
-    activeProviderId: "codex",
+    activeProviderIds: ["codex"],
+    get activeProviderId() {
+      return this.activeProviderIds[0] ?? "codex";
+    },
     providers: {
       codex: {
         codexHome,

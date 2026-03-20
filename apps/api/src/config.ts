@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type ProviderId = "codex" | "claude-code";
+export const ALL_PROVIDER_IDS = ["codex", "claude-code"] as const satisfies readonly ProviderId[];
 
 export interface CodexProviderConfig {
   codexHome: string;
@@ -20,11 +21,33 @@ export interface AppConfig {
   monitorDbPath: string;
   webDistPath: string;
   timezone: string;
-  activeProviderId: ProviderId;
+  activeProviderIds: ProviderId[];
+  readonly activeProviderId: ProviderId;
   providers: {
     codex: CodexProviderConfig;
     claudeCode: ClaudeCodeProviderConfig;
   };
+}
+
+export function resolveActiveProviderIds(rawValue: string | undefined): ProviderId[] {
+  switch (rawValue ?? "all") {
+    case "all":
+      return [...ALL_PROVIDER_IDS];
+    case "codex":
+      return ["codex"];
+    case "claude-code":
+      return ["claude-code"];
+    default:
+      return ["codex"];
+  }
+}
+
+export function serializeMonitorProvider(activeProviderIds: readonly ProviderId[]): "all" | ProviderId {
+  if (ALL_PROVIDER_IDS.every((providerId) => activeProviderIds.includes(providerId))) {
+    return "all";
+  }
+
+  return activeProviderIds[0] ?? "codex";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -34,7 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const agentsHome = env.AGENTS_HOME ?? path.join(os.homedir(), ".agents");
   const claudeCodeHome = env.CLAUDE_CODE_HOME ?? path.join(os.homedir(), ".claude");
   const monitorDbPath = env.MONITOR_DB ?? path.join(repoRoot, "data", "monitor.sqlite");
-  const activeProviderId: ProviderId = env.MONITOR_PROVIDER === "claude-code" ? "claude-code" : "codex";
+  const activeProviderIds = resolveActiveProviderIds(env.MONITOR_PROVIDER);
 
   return {
     host: env.HOST ?? "127.0.0.1",
@@ -43,7 +66,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     monitorDbPath,
     webDistPath: path.join(repoRoot, "apps", "web", "dist"),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    activeProviderId,
+    activeProviderIds,
+    get activeProviderId() {
+      return activeProviderIds[0] ?? "codex";
+    },
     providers: {
       codex: {
         codexHome,

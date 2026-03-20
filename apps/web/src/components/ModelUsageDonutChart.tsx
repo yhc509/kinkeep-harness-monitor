@@ -1,16 +1,27 @@
 import type { ModelTokenUsageItem } from "@codex-monitor/shared";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { formatNumber } from "../utils/format";
+import { inferModelTheme, type ProviderId } from "../utils/providerTheme";
 
-const CHART_COLORS = [
-  "#54d2ff",
-  "#ffb454",
-  "#43d392",
-  "#7ae582",
-  "#7aa2ff",
-  "#ff7b72",
-  "#8b949e"
-];
+const CHART_PALETTES: Record<ProviderId | "neutral", string[]> = {
+  codex: [
+    "var(--provider-codex)",
+    "#7ce3ff",
+    "var(--provider-codex-soft)",
+    "#7aa2ff"
+  ],
+  "claude-code": [
+    "var(--provider-claude)",
+    "#ffd08c",
+    "var(--provider-claude-soft)",
+    "#ff914d"
+  ],
+  neutral: [
+    "#8b949e",
+    "#6e7681",
+    "rgba(255, 255, 255, 0.22)"
+  ]
+};
 
 interface ModelUsageDonutChartProps {
   data: ModelTokenUsageItem[];
@@ -38,12 +49,26 @@ export function ModelUsageDonutChart({ data }: ModelUsageDonutChartProps) {
     );
   }
 
-  const chartData = data.map((item, index) => ({
-    ...item,
-    color: CHART_COLORS[index % CHART_COLORS.length],
-    label: formatModelLabel(item),
-    share: item.totalTokens / totalTokens
-  }));
+  const paletteIndexes: Record<ProviderId | "neutral", number> = {
+    codex: 0,
+    "claude-code": 0,
+    neutral: 0
+  };
+
+  const chartData = data.map((item) => {
+    const theme = inferModelTheme(item);
+    const palette = CHART_PALETTES[theme];
+    const color = palette[paletteIndexes[theme] % palette.length];
+    paletteIndexes[theme] += 1;
+
+    return {
+      ...item,
+      color,
+      theme,
+      label: formatModelLabel(item),
+      share: item.totalTokens / totalTokens
+    };
+  });
 
   return (
     <div className="model-usage-layout">
@@ -75,7 +100,10 @@ export function ModelUsageDonutChart({ data }: ModelUsageDonutChartProps) {
 
       <div className="model-usage-legend">
         {chartData.map((item) => (
-          <div key={`${item.modelProvider ?? "none"}:${item.modelName}`} className="model-usage-row">
+          <div
+            key={`${item.modelProvider ?? "none"}:${item.modelName}`}
+            className={item.theme === "neutral" ? "model-usage-row" : `model-usage-row ${item.theme}`}
+          >
             <div className="model-usage-main">
               <span className="model-usage-swatch" style={{ backgroundColor: item.color }} />
               <div className="model-usage-copy">

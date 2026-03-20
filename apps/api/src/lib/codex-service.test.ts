@@ -18,10 +18,12 @@ describe("CodexDataService", () => {
 
     const sessions = service.listSessions({ limit: 10 });
     expect(sessions).toHaveLength(4);
+    expect(sessions[0]?.provider).toBe("codex");
     expect(sessions[0]?.title).toBe("Demo session");
     expect(sessions[0]?.projectName).toBe("demo-project");
 
     const detail = service.getSessionDetail("thread-1");
+    expect(detail?.provider).toBe("codex");
     expect(detail?.timeline.some((item) => item.kind === "user_message")).toBe(true);
     expect(detail?.tokenSeries[0]?.totalTokens).toBe(140);
     expect(detail?.projectPath.endsWith("/workspace/demo-project")).toBe(true);

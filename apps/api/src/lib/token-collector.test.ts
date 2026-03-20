@@ -2,11 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { ClaudeCodeDataService } from "./claude-code-service";
 import { CodexDataService } from "./codex-service";
 import { TokenCollectorService } from "./token-collector";
+import { createClaudeCodeTestFixture } from "../test-support/claude-fixture";
 import { createTestFixture } from "../test-support/fixture";
 
-const fixtures: Array<ReturnType<typeof createTestFixture>> = [];
+const fixtures: Array<{ cleanup: () => void }> = [];
 
 afterEach(() => {
   while (fixtures.length > 0) {
@@ -20,7 +22,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     collector.captureSnapshot(new Date("2026-03-14T10:05:00+09:00"));
 
@@ -31,6 +33,11 @@ describe("TokenCollectorService", () => {
     expect(tokens.daily[0]?.uncachedTokens).toBe(120);
     expect(tokens.daily[0]?.uncachedInputTokens).toBe(80);
     expect(tokens.daily[0]?.outputTokens).toBe(40);
+    expect(tokens.dailyProviderTokens[0]).toEqual({
+      day: "2026-03-14",
+      codexTokens: 140,
+      claudeCodeTokens: 0
+    });
     expect(tokens.currentHourTokens.totalTokens).toBe(140);
     expect(tokens.currentHourTokens.cachedInputTokens).toBe(20);
     expect(tokens.currentHourTokens.uncachedTokens).toBe(120);
@@ -50,7 +57,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     fs.writeFileSync(
       fixture.rolloutPath,
@@ -139,7 +146,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     writeTokenRollout(codex.getSessionRoot(), "legacy-model", null, 44, "2026-03-14T12:00:00.000Z", null);
 
@@ -158,7 +165,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     for (let index = 0; index < 7; index += 1) {
       writeTokenRollout(
@@ -187,7 +194,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     collector.captureSnapshot(new Date("2026-03-14T10:05:00+09:00"));
 
@@ -242,7 +249,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     collector.captureSnapshot(new Date("2026-03-14T10:05:00+09:00"));
 
@@ -286,7 +293,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
     const sessionRoot = codex.getSessionRoot();
     const sharedProjectRoot = path.join(fixture.rootDir, "workspace", "demo-project");
     const otherProjectRoot = path.join(fixture.rootDir, "workspace", "bubble-project");
@@ -314,7 +321,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
     const recoveredProjectRoot = path.join(fixture.rootDir, "workspace", "recovered-project");
     const recoveredRolloutPath = path.join(codex.getSessionRoot(), "rollout-recovered-project.jsonl");
 
@@ -340,7 +347,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
 
     writeTokenRollout(codex.getSessionRoot(), "unknown-project", null, 55, "2026-03-15T01:00:00.000Z");
 
@@ -359,7 +366,7 @@ describe("TokenCollectorService", () => {
     fixtures.push(fixture);
 
     const codex = new CodexDataService(fixture.config);
-    const collector = new TokenCollectorService(fixture.config, codex);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
     const sessionRoot = codex.getSessionRoot();
     const workspaceRoot = path.join(fixture.rootDir, "workspace");
 
@@ -386,6 +393,266 @@ describe("TokenCollectorService", () => {
       projectName: "Other",
       totalTokens: 88
     });
+  });
+
+  it("parses Claude Code transcript assistant usage into token aggregates", () => {
+    const fixture = createClaudeCodeTestFixture();
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+
+    collector.captureSnapshot(new Date("2026-03-18T10:05:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-18T10:05:00+09:00"));
+    expect(tokens.daily[0]?.totalTokens).toBe(21135);
+    expect(tokens.daily[0]?.inputTokens).toBe(3);
+    expect(tokens.daily[0]?.cachedInputTokens).toBe(21121);
+    expect(tokens.daily[0]?.outputTokens).toBe(11);
+    expect(tokens.dailyProviderTokens[0]).toEqual({
+      day: "2026-03-18",
+      codexTokens: 0,
+      claudeCodeTokens: 21135
+    });
+    expect(tokens.modelUsage).toEqual([
+      {
+        modelName: "claude-opus-4-6",
+        modelProvider: "anthropic",
+        totalTokens: 21135
+      }
+    ]);
+  });
+
+  it("splits daily provider totals when Codex and Claude Code both contribute on the same day", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex, claude]);
+    const claudeProjectDir = path.join(fixture.config.providers.claudeCode.home, "projects", "provider-split");
+
+    writeTokenRollout(
+      codex.getSessionRoot(),
+      "codex-provider-split",
+      path.join(fixture.rootDir, "workspace", "provider-split", "app"),
+      140,
+      "2026-03-18T02:00:00.000Z"
+    );
+    fs.mkdirSync(claudeProjectDir, { recursive: true });
+    fs.writeFileSync(path.join(claudeProjectDir, "session-mixed.jsonl"), [
+      {
+        type: "user",
+        timestamp: "2026-03-18T02:01:00.000Z",
+        cwd: path.join(fixture.rootDir, "workspace", "provider-split", "app"),
+        message: {
+          role: "user",
+          content: "Split provider usage"
+        }
+      },
+      {
+        type: "assistant",
+        timestamp: "2026-03-18T02:01:05.000Z",
+        message: {
+          role: "assistant",
+          model: "claude-opus-4-6",
+          usage: {
+            input_tokens: 5,
+            cache_creation_input_tokens: 20,
+            cache_read_input_tokens: 25,
+            output_tokens: 10
+          }
+        }
+      }
+    ].map((line) => JSON.stringify(line)).join("\n"), "utf8");
+
+    collector.captureSnapshot(new Date("2026-03-18T10:05:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-18T10:05:00+09:00"));
+    expect(tokens.daily[0]?.totalTokens).toBe(200);
+    expect(tokens.dailyProviderTokens[0]).toEqual({
+      day: "2026-03-18",
+      codexTokens: 140,
+      claudeCodeTokens: 60
+    });
+  });
+
+  it("imports Claude Code stats-cache daily usage into token queries", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    const statsCachePath = path.join(fixture.claudeHome, "stats-cache.json");
+
+    writeStatsCache(statsCachePath, {
+      version: 2,
+      lastComputedDate: "2026-01-07",
+      dailyModelTokens: [
+        {
+          date: "2026-01-07",
+          tokensByModel: {
+            "claude-sonnet-4-5-20250929": 2_079,
+            "claude-opus-4-5-20250514": 150_000
+          }
+        }
+      ],
+      modelUsage: {
+        "claude-sonnet-4-5-20250929": {
+          inputTokens: 11_084,
+          outputTokens: 116_306,
+          cacheReadInputTokens: 27_682_934,
+          cacheCreationInputTokens: 1_983_512
+        }
+      }
+    });
+
+    collector.importStatsCacheUsage(statsCachePath);
+    collector.captureSnapshot(new Date("2026-01-07T23:30:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-01-07T23:30:00+09:00"));
+    expect(tokens.daily[0]).toMatchObject({
+      day: "2026-01-07",
+      totalTokens: 152_079,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0
+    });
+    expect(tokens.dailyProviderTokens[0]).toEqual({
+      day: "2026-01-07",
+      codexTokens: 0,
+      claudeCodeTokens: 152_079
+    });
+    expect(tokens.hourly).toContainEqual({
+      hourBucket: "2026-01-07T00:00:00",
+      totalTokens: 152_079,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      requestCount: 0
+    });
+    expect(tokens.modelUsage).toEqual([
+      {
+        modelName: "claude-opus-4-5-20250514",
+        modelProvider: "anthropic",
+        totalTokens: 150_000
+      },
+      {
+        modelName: "claude-sonnet-4-5-20250929",
+        modelProvider: "anthropic",
+        totalTokens: 2_079
+      }
+    ]);
+
+    const projectUsage = collector.getProjectTokenUsage("day", "2026-01-07", new Date("2026-01-07T23:30:00+09:00"));
+    expect(projectUsage.projects[0]).toMatchObject({
+      projectId: "__claude-code__",
+      projectName: "Claude Code",
+      projectPath: "",
+      totalTokens: 152_079,
+      requestCount: 0
+    });
+  });
+
+  it("ignores a missing Claude Code stats-cache file", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    const missingPath = path.join(fixture.claudeHome, "missing-stats-cache.json");
+
+    expect(() => collector.importStatsCacheUsage(missingPath)).not.toThrow();
+
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    const usageCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_hourly_usage
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    const indexCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_index_state
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    database.close();
+
+    expect(usageCount.count).toBe(0);
+    expect(indexCount.count).toBe(0);
+  });
+
+  it("re-imports Claude Code stats-cache data without duplicating rows", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    const statsCachePath = path.join(fixture.claudeHome, "stats-cache.json");
+
+    writeStatsCache(statsCachePath, {
+      version: 2,
+      lastComputedDate: "2026-01-07",
+      dailyModelTokens: [
+        {
+          date: "2026-01-07",
+          tokensByModel: {
+            "claude-sonnet-4-5-20250929": 10,
+            "claude-opus-4-5-20250514": 20
+          }
+        }
+      ],
+      modelUsage: {}
+    });
+    collector.importStatsCacheUsage(statsCachePath);
+
+    writeStatsCache(statsCachePath, {
+      version: 2,
+      lastComputedDate: "2026-01-07",
+      dailyModelTokens: [
+        {
+          date: "2026-01-07",
+          tokensByModel: {
+            "claude-opus-4-5-20250514": 70
+          }
+        }
+      ],
+      modelUsage: {}
+    });
+    collector.importStatsCacheUsage(statsCachePath);
+    collector.captureSnapshot(new Date("2026-01-07T23:30:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-01-07T23:30:00+09:00"));
+    expect(tokens.daily[0]?.totalTokens).toBe(70);
+    expect(tokens.modelUsage).toEqual([
+      {
+        modelName: "claude-opus-4-5-20250514",
+        modelProvider: "anthropic",
+        totalTokens: 70
+      }
+    ]);
+
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    const usageCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_hourly_usage
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    const modelCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_hourly_model_usage
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    const indexCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_index_state
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    database.close();
+
+    expect(usageCount.count).toBe(1);
+    expect(modelCount.count).toBe(1);
+    expect(indexCount.count).toBe(1);
   });
 });
 
@@ -495,4 +762,8 @@ function insertThreadRow(
     "enabled"
   );
   database.close();
+}
+
+function writeStatsCache(filePath: string, input: Record<string, unknown>): void {
+  fs.writeFileSync(filePath, JSON.stringify(input, null, 2), "utf8");
 }

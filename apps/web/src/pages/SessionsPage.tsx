@@ -8,6 +8,7 @@ import { Panel } from "../components/Panel";
 import { SessionTimeline } from "../components/SessionTimeline";
 import { useApiResource } from "../hooks/useApiResource";
 import { formatDateTime } from "../utils/format";
+import { getProviderLabel, getProviderThemeClassName } from "../utils/providerTheme";
 
 const emptyProjects: ProjectSummary[] = [];
 const emptySessions: SessionListItem[] = [];
@@ -256,10 +257,13 @@ export function SessionsPage() {
                     <div key={session.id} className="session-group">
                       <Link
                         to={`/sessions/projects/${session.projectId}/${session.id}`}
-                        className="session-browser-item"
+                        className={`session-browser-item session-card provider-card ${getProviderThemeClassName(session.provider)}`}
                       >
                         <div className="session-browser-copy">
-                          <strong className="title-clamp-2" title={session.title}>{session.title}</strong>
+                          <div className="session-title-row">
+                            <strong className="title-clamp-2" title={session.title}>{session.title}</strong>
+                            {renderProviderBadge(session.provider)}
+                          </div>
                           <p>{toProjectRelativePath(session.cwd, session.projectPath)}</p>
                         </div>
                         <div className="session-browser-meta">
@@ -273,19 +277,22 @@ export function SessionsPage() {
                             <Link
                               key={subagent.id}
                               to={`/sessions/projects/${subagent.projectId}/${subagent.id}`}
-                              className="subagent-item"
-                              >
-                                <div className="subagent-item-main">
-                                  <span className="subagent-item-icon" aria-hidden="true">
-                                    <Bot size={14} strokeWidth={2.2} />
-                                  </span>
-                                  <div className="subagent-item-copy">
+                              className={`subagent-item session-card provider-card ${getProviderThemeClassName(subagent.provider)}`}
+                            >
+                              <div className="subagent-item-main">
+                                <span className="subagent-item-icon" aria-hidden="true">
+                                  <Bot size={14} strokeWidth={2.2} />
+                                </span>
+                                <div className="subagent-item-copy">
+                                  <div className="session-title-row">
                                     <strong className="title-clamp-2" title={formatSubagentLabel(subagent)}>
                                       {formatSubagentLabel(subagent)}
                                     </strong>
-                                    <p>{subagent.title}</p>
+                                    {renderProviderBadge(subagent.provider)}
                                   </div>
+                                  <p>{subagent.title}</p>
                                 </div>
+                              </div>
                               <span className="subagent-item-time">{formatDateTime(subagent.updatedAt)}</span>
                             </Link>
                           ))}
@@ -302,16 +309,19 @@ export function SessionsPage() {
                           <Link
                             key={subagent.id}
                             to={`/sessions/projects/${subagent.projectId}/${subagent.id}`}
-                            className="subagent-item"
+                            className={`subagent-item session-card provider-card ${getProviderThemeClassName(subagent.provider)}`}
                           >
                             <div className="subagent-item-main">
                               <span className="subagent-item-icon" aria-hidden="true">
                                 <Bot size={14} strokeWidth={2.2} />
                               </span>
                               <div className="subagent-item-copy">
-                                <strong className="title-clamp-2" title={formatSubagentLabel(subagent)}>
-                                  {formatSubagentLabel(subagent)}
-                                </strong>
+                                <div className="session-title-row">
+                                  <strong className="title-clamp-2" title={formatSubagentLabel(subagent)}>
+                                    {formatSubagentLabel(subagent)}
+                                  </strong>
+                                  {renderProviderBadge(subagent.provider)}
+                                </div>
                                 <p>{subagent.title}</p>
                               </div>
                             </div>
@@ -396,7 +406,7 @@ export function SessionsPage() {
                 </div>
               ) : null}
 
-              <div className="detail-hero conversation-hero">
+              <div className={`detail-hero conversation-hero ${getProviderThemeClassName(detailData.provider)}`}>
                 <div>
                   <p className="eyebrow">{detailData.isSubagent ? "SUBAGENT" : "THREAD"}</p>
                   <h3>{detailTitle}</h3>
@@ -407,6 +417,7 @@ export function SessionsPage() {
                   </p>
                 </div>
                 <div className="detail-meta">
+                  {renderProviderBadge(detailData.provider)}
                   <span>{detailData.modelProvider}</span>
                   <span>{detailData.memoryMode}</span>
                   <span>Updated {formatDateTime(detailData.updatedAt)}</span>
@@ -444,14 +455,17 @@ export function SessionsPage() {
                         <Link
                           key={subagent.id}
                           to={`/sessions/projects/${detailData.projectId}/${subagent.id}`}
-                          className="subagent-item"
+                          className={`subagent-item session-card provider-card ${getProviderThemeClassName(detailData.provider)}`}
                         >
                           <div className="subagent-item-main">
                             <span className="subagent-item-icon" aria-hidden="true">
                               <Bot size={14} strokeWidth={2.2} />
                             </span>
                             <div className="subagent-item-copy">
-                              <strong>{formatSubagentLabel(subagent)}</strong>
+                              <div className="session-title-row">
+                                <strong>{formatSubagentLabel(subagent)}</strong>
+                                {renderProviderBadge(detailData.provider)}
+                              </div>
                               <p>{subagent.title}</p>
                             </div>
                           </div>
@@ -463,7 +477,12 @@ export function SessionsPage() {
                 </div>
               ) : null}
 
-              <SessionTimeline items={detailData.timeline} showActivity={showActivity} showTechnical={showTechnical} />
+              <SessionTimeline
+                items={detailData.timeline}
+                showActivity={showActivity}
+                showTechnical={showTechnical}
+                provider={detailData.provider ?? "codex"}
+              />
             </div>
           ) : (
             <div className="state-box">No sessions</div>
@@ -509,4 +528,9 @@ function summarizeSubagentRoles(subagents: SubagentSummary[]): Array<[string, nu
   }
 
   return Array.from(counts.entries()).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+}
+
+function renderProviderBadge(provider?: SessionListItem["provider"] | null) {
+  const providerClass = getProviderThemeClassName(provider);
+  return <span className={`provider-badge ${providerClass}`}>{getProviderLabel(provider)}</span>;
 }

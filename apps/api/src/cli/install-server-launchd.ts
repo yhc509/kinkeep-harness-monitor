@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig } from "../config";
+import { loadConfig, serializeMonitorProvider } from "../config";
 
 const LABEL = "com.harness-monitor.webui";
 const require = createRequire(import.meta.url);
@@ -47,7 +47,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
     <key>CLAUDE_CODE_HOME</key>
     <string>${escapeXml(config.providers.claudeCode.home)}</string>
     <key>MONITOR_PROVIDER</key>
-    <string>${escapeXml(config.activeProviderId)}</string>
+    <string>${escapeXml(serializeMonitorProvider(config.activeProviderIds))}</string>
     <key>MONITOR_DB</key>
     <string>${escapeXml(config.monitorDbPath)}</string>
   </dict>

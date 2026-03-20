@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { TokenPeriodUnit } from "@codex-monitor/shared";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw } from "lucide-react";
 import { apiResourceKeys, createSnapshot, getProjectTokenUsage, getTokens } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
@@ -46,6 +46,17 @@ export function TokensPage() {
   });
   const hourlySeries = tokens.data?.hourly ?? [];
   const trailingSevenDays = tokens.data?.daily.slice(-7) ?? [];
+  const dailyProviderTokenMap = new Map(
+    (tokens.data?.dailyProviderTokens ?? []).map((entry) => [entry.day, entry])
+  );
+  const dailyChartData = (tokens.data?.daily ?? []).map((point) => {
+    const providerEntry = dailyProviderTokenMap.get(point.day);
+    return {
+      ...point,
+      codexTokens: providerEntry?.codexTokens ?? point.totalTokens,
+      claudeCodeTokens: providerEntry?.claudeCodeTokens ?? 0
+    };
+  });
   const activeProjectAnchorDay = projectUsage.data?.anchorDay ?? projectAnchorDay;
 
   async function handleSync() {
@@ -152,8 +163,16 @@ export function TokensPage() {
             >
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height={340}>
-                  <BarChart data={tokens.data.daily} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barCategoryGap="24%">
+                  <BarChart data={dailyChartData} margin={{ top: 28, right: 8, bottom: 0, left: 8 }} barCategoryGap="24%">
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <Legend
+                      verticalAlign="top"
+                      align="right"
+                      iconType="circle"
+                      iconSize={8}
+                      wrapperStyle={{ fontSize: 12, paddingBottom: 8 }}
+                      formatter={(value) => <span style={{ color: "rgba(255,255,255,0.72)" }}>{value}</span>}
+                    />
                     <XAxis dataKey="day" tickFormatter={formatDay} stroke="rgba(255,255,255,0.42)" axisLine={false} tickLine={false} />
                     <YAxis
                       width={104}
@@ -166,13 +185,21 @@ export function TokensPage() {
                     />
                     <Tooltip
                       cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                      formatter={(value) => [formatChartValue(value), "Total tokens"]}
+                      formatter={(value, name) => [formatChartValue(value), String(name ?? "")]}
                     />
                     <Bar
-                      dataKey="totalTokens"
-                      name="Total tokens"
-                      fill="var(--accent)"
-                      radius={[8, 8, 0, 0]}
+                      dataKey="codexTokens"
+                      name="Codex"
+                      stackId="tokens"
+                      fill="var(--provider-codex)"
+                      maxBarSize={44}
+                    />
+                    <Bar
+                      dataKey="claudeCodeTokens"
+                      name="Claude Code"
+                      stackId="tokens"
+                      fill="var(--provider-claude)"
+                      radius={[6, 6, 0, 0]}
                       maxBarSize={44}
                     />
                   </BarChart>

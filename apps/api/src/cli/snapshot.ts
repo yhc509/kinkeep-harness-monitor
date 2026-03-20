@@ -3,8 +3,8 @@ import { TokenCollectorService } from "../lib/token-collector";
 import { createProviderRegistry } from "../lib/provider-registry";
 
 const config = loadConfig();
-const provider = createProviderRegistry(config).getActiveProvider();
-const collector = new TokenCollectorService(config, provider);
+const providerRegistry = createProviderRegistry(config);
+const collector = new TokenCollectorService(config, providerRegistry.getProviders());
 
 try {
   const result = collector.captureSnapshot();

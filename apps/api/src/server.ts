@@ -6,6 +6,7 @@ import staticPlugin from "@fastify/static";
 import { overviewResponseSchema } from "@codex-monitor/shared";
 import type { AppConfig } from "./config";
 import { loadConfig } from "./config";
+import { CompositeProvider } from "./lib/composite-provider";
 import { TokenCollectorService } from "./lib/token-collector";
 import { createProviderRegistry } from "./lib/provider-registry";
 
@@ -14,8 +15,9 @@ export async function buildServer(config: AppConfig = loadConfig()) {
     logger: true
   });
   const providerRegistry = createProviderRegistry(config);
-  const provider = providerRegistry.getActiveProvider();
-  const collectorService = new TokenCollectorService(config, provider);
+  const providers = providerRegistry.getProviders();
+  const provider = new CompositeProvider(providers);
+  const collectorService = new TokenCollectorService(config, providers);
 
   collectorService.ensureSchema();
   provider.ensureMonitorSchema();
@@ -27,7 +29,8 @@ export async function buildServer(config: AppConfig = loadConfig()) {
   app.get("/api/health", async () => ({
     ok: true,
     timezone: config.timezone,
-    provider: config.activeProviderId
+    provider: config.activeProviderIds[0],
+    providers: config.activeProviderIds
   }));
 
   app.get("/api/overview", async () => {
