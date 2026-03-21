@@ -9,19 +9,19 @@ const SVG_WIDTH = 720;
 const SVG_HEIGHT = 360;
 
 const bubbleColors = [
-  "var(--provider-codex)",
-  "#7ce3ff",
-  "#2fb7e4",
+  "var(--accent)",
+  "#c4b5fd",
+  "#8b7ed8",
   "var(--provider-claude)",
   "#ffd08c",
+  "var(--provider-codex)",
+  "#7ce3ff",
+  "var(--provider-agents)",
   "#8dd96f",
   "#f97b72",
   "#9f8cff",
   "#46c9b8",
-  "#f28c28",
-  "#7cc6fe",
-  "#5bd0a5",
-  "#f28bb5"
+  "#f28c28"
 ];
 
 interface ProjectBubbleChartProps {

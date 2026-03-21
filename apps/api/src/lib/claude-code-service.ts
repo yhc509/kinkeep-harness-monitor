@@ -248,20 +248,48 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
   }
 
   getMemory(): MemoryResponse {
-    scanClaudeMemoryFiles(this.getSessionRoot());
+    const memoryFiles = scanClaudeMemoryFiles(this.getSessionRoot());
     const totalSessions = this.getSessionRecords().length;
+    const devInstructions = this.readDeveloperInstructions();
+    const entries = memoryFiles.map((filePath) => {
+      const content = fs.readFileSync(filePath, "utf8");
+      const frontmatter = extractFrontmatter(content);
+      const bodyContent = stripFrontmatter(content).trim();
+      const stat = fs.statSync(filePath);
+      const fallbackTitle = path.basename(filePath, ".md");
+
+      return {
+        provider: "claude-code",
+        threadId: filePath,
+        title: frontmatter.name ?? fallbackTitle,
+        rawMemory: bodyContent,
+        rolloutSummary: frontmatter.description ?? "",
+        usageCount: null,
+        lastUsage: null,
+        generatedAt: toLocalDateTime(stat.mtimeMs) ?? ""
+      };
+    });
+    const providerConfigs = [{
+      provider: "claude-code" as const,
+      developerInstructions: devInstructions,
+      personality: null,
+      sourceStatus: entries.length > 0 ? "ready" as const : "empty" as const,
+      entryCount: entries.length,
+      totalThreads: totalSessions
+    }];
 
     return memoryResponseSchema.parse({
-      entries: [],
+      entries,
+      providerConfigs,
       modeCounts: [{
         mode: "enabled",
         count: totalSessions
       }],
       totalThreads: totalSessions,
       hasStage1OutputsTable: false,
-      stage1OutputCount: 0,
-      sourceStatus: "unsupported",
-      developerInstructions: null,
+      stage1OutputCount: entries.length,
+      sourceStatus: entries.length > 0 ? "ready" : "empty",
+      developerInstructions: devInstructions,
       personality: null
     });
   }
@@ -524,6 +552,25 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
     } catch {
       return null;
     }
+  }
+
+  private readDeveloperInstructions(): string | null {
+    const sessionRoot = this.getSessionRoot();
+    if (!fs.existsSync(sessionRoot)) {
+      return null;
+    }
+
+    const projectDirs = fs.readdirSync(sessionRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory());
+
+    for (const dir of projectDirs) {
+      const claudeMdPath = path.join(sessionRoot, dir.name, "CLAUDE.md");
+      if (fs.existsSync(claudeMdPath)) {
+        return fs.readFileSync(claudeMdPath, "utf8");
+      }
+    }
+
+    return null;
   }
 
   private resolveProjectInfo(cwd: string): ResolvedProjectInfo {
@@ -1167,6 +1214,19 @@ function extractFrontmatter(content: string): { name: string | null; description
   }
 
   return { name, description };
+}
+
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---")) {
+    return content;
+  }
+
+  const endIndex = content.indexOf("\n---", 3);
+  if (endIndex === -1) {
+    return content;
+  }
+
+  return content.slice(endIndex + 4);
 }
 
 function normalizeSkillField(value: string): string {

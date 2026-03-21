@@ -45,6 +45,13 @@ export function createClaudeCodeTestFixture(options: { includeAssistantUsage?: b
 
   fs.writeFileSync(path.join(primaryProjectDir, "CLAUDE.md"), "# Project instructions\n", "utf8");
   fs.writeFileSync(path.join(primaryProjectDir, "memory", "notes.md"), "Remember this later\n", "utf8");
+  fs.writeFileSync(path.join(primaryProjectDir, "memory", "coding-style.md"), `---
+name: Coding Style
+description: Preferred coding conventions
+---
+
+Use TypeScript strict mode
+`, "utf8");
 
   const includeAssistantUsage = options.includeAssistantUsage ?? true;
 

@@ -176,7 +176,15 @@ describe("CompositeProvider", () => {
         entries: [createMemoryEntry("thread-a")],
         modeCounts: [{ mode: "enabled", count: 1 }],
         totalThreads: 1,
-        developerInstructions: "provider-a-instructions"
+        developerInstructions: "provider-a-instructions",
+        providerConfigs: [{
+          provider: "codex",
+          developerInstructions: "provider-a-instructions",
+          personality: null,
+          sourceStatus: "ready",
+          entryCount: 1,
+          totalThreads: 1
+        }]
       }),
       integrations: createIntegrations({
         mcpServers: [{ name: "docs-a", url: null, usageCount: 1, toolNames: ["search"] }],
@@ -217,7 +225,15 @@ describe("CompositeProvider", () => {
           { mode: "enabled", count: 1 }
         ],
         totalThreads: 3,
-        developerInstructions: "provider-b-instructions"
+        developerInstructions: "provider-b-instructions",
+        providerConfigs: [{
+          provider: "claude-code",
+          developerInstructions: "provider-b-instructions",
+          personality: null,
+          sourceStatus: "ready",
+          entryCount: 1,
+          totalThreads: 3
+        }]
       }),
       integrations: createIntegrations({
         mcpServers: [{ name: "docs-b", url: "https://example.com", usageCount: 2, toolNames: ["fetch"] }],
@@ -260,6 +276,8 @@ describe("CompositeProvider", () => {
     ]);
     expect(memory.totalThreads).toBe(4);
     expect(memory.developerInstructions).toBe("provider-a-instructions");
+    expect(memory.providerConfigs).toHaveLength(2);
+    expect(memory.providerConfigs.map((config) => config.provider)).toEqual(["codex", "claude-code"]);
 
     expect(integrations.mcpServers.map((server) => server.name)).toEqual(["docs-a", "docs-b"]);
     expect(integrations.skills.map((skill) => skill.id)).toEqual(["skill-a", "skill-b"]);
@@ -409,6 +427,7 @@ function createOverview(overrides: Partial<OverviewResponse> = {}): OverviewResp
 function createMemory(overrides: Partial<MemoryResponse> = {}): MemoryResponse {
   return {
     entries: [],
+    providerConfigs: [],
     modeCounts: [],
     totalThreads: 0,
     hasStage1OutputsTable: true,
@@ -422,6 +441,7 @@ function createMemory(overrides: Partial<MemoryResponse> = {}): MemoryResponse {
 
 function createMemoryEntry(threadId: string): MemoryResponse["entries"][number] {
   return {
+    provider: "codex",
     threadId,
     title: threadId,
     rawMemory: `memory-${threadId}`,

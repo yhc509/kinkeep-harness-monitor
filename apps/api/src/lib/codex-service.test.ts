@@ -79,10 +79,13 @@ describe("CodexDataService", () => {
 
     const memory = service.getMemory();
     expect(memory.entries[0]?.rawMemory).toBe("Remembered memory");
+    expect(memory.entries[0]?.provider).toBe("codex");
     expect(memory.sourceStatus).toBe("ready");
     expect(memory.stage1OutputCount).toBe(1);
     expect(memory.developerInstructions).toContain("root causes");
     expect(memory.personality).toBe("friendly");
+    expect(memory.providerConfigs).toHaveLength(1);
+    expect(memory.providerConfigs[0]).toMatchObject({ provider: "codex", sourceStatus: "ready" });
 
     service.refreshIntegrationsUsage(new Date("2026-03-14T10:15:00+09:00"));
     const integrations = service.getIntegrations();

@@ -94,10 +94,29 @@ describe("ClaudeCodeDataService", () => {
     });
 
     const memory = service.getMemory();
-    expect(memory.sourceStatus).toBe("unsupported");
+    expect(memory.sourceStatus).toBe("ready");
     expect(memory.modeCounts).toEqual([{ mode: "enabled", count: 2 }]);
     expect(memory.totalThreads).toBe(2);
-    expect(memory.entries).toEqual([]);
+    expect(memory.entries).toHaveLength(2);
+    expect(memory.entries[0]?.provider).toBe("claude-code");
+    expect(memory.stage1OutputCount).toBe(2);
+    expect(memory.providerConfigs).toHaveLength(1);
+    expect(memory.providerConfigs[0]).toMatchObject({
+      provider: "claude-code",
+      sourceStatus: "ready",
+      entryCount: 2
+    });
+
+    const codingStyleEntry = memory.entries.find((entry) => entry.title === "Coding Style");
+    expect(codingStyleEntry).toBeDefined();
+    expect(codingStyleEntry!.rolloutSummary).toBe("Preferred coding conventions");
+    expect(codingStyleEntry!.rawMemory).toContain("Use TypeScript strict mode");
+
+    const notesEntry = memory.entries.find((entry) => entry.title === "notes");
+    expect(notesEntry).toBeDefined();
+    expect(notesEntry!.rawMemory).toContain("Remember this later");
+
+    expect(memory.developerInstructions).toContain("# Project instructions");
 
     const integrations = service.getIntegrations();
     expect(integrations.mcpServers).toEqual([

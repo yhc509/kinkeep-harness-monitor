@@ -396,6 +396,7 @@ export class CodexDataService implements MonitorProviderAdapter {
       }>;
 
       entries = rows.map((row) => ({
+        provider: "codex",
         threadId: row.thread_id,
         title: row.title,
         rawMemory: row.raw_memory,
@@ -411,9 +412,18 @@ export class CodexDataService implements MonitorProviderAdapter {
     const sourceStatus = hasStage1OutputsTable
       ? (stage1OutputCount > 0 ? "ready" : "empty")
       : "unsupported";
+    const providerConfigs = [{
+      provider: "codex" as const,
+      developerInstructions: configData.developerInstructions,
+      personality: configData.personality,
+      sourceStatus,
+      entryCount: entries.length,
+      totalThreads: totalThreads.count
+    }];
 
     return memoryResponseSchema.parse({
       entries,
+      providerConfigs,
       modeCounts: modeRows.map((row) => ({
         mode: row.mode,
         count: row.count

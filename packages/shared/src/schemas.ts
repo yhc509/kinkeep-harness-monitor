@@ -170,6 +170,7 @@ export const overviewResponseSchema = z.object({
 });
 
 export const memoryEntrySchema = z.object({
+  provider: z.string().optional(),
   threadId: z.string(),
   title: z.string(),
   rawMemory: z.string(),
@@ -184,8 +185,18 @@ export const memoryModeCountSchema = z.object({
   count: z.number()
 });
 
+export const memoryProviderConfigSchema = z.object({
+  provider: z.string(),
+  developerInstructions: z.string().nullable(),
+  personality: z.string().nullable(),
+  sourceStatus: z.enum(["ready", "empty", "unsupported"]),
+  entryCount: z.number(),
+  totalThreads: z.number()
+});
+
 export const memoryResponseSchema = z.object({
   entries: z.array(memoryEntrySchema),
+  providerConfigs: z.array(memoryProviderConfigSchema),
   modeCounts: z.array(memoryModeCountSchema),
   totalThreads: z.number(),
   hasStage1OutputsTable: z.boolean(),
@@ -280,6 +291,7 @@ export type ProjectTokenUsageItem = z.infer<typeof projectTokenUsageItemSchema>;
 export type ModelTokenUsageItem = z.infer<typeof modelTokenUsageItemSchema>;
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
+export type MemoryProviderConfig = z.infer<typeof memoryProviderConfigSchema>;
 export type MemoryResponse = z.infer<typeof memoryResponseSchema>;
 export type McpServerSummary = z.infer<typeof mcpServerSummarySchema>;
 export type SkillSummary = z.infer<typeof skillSummarySchema>;

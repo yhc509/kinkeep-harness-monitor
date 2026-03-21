@@ -143,10 +143,12 @@ export class CompositeProvider implements MonitorProviderAdapter {
     const [firstProvider, ...restProviders] = this.providers;
     const memory = (firstProvider ?? this.getFirstProvider()).getMemory();
     const modeCountMap = new Map(memory.modeCounts.map((entry) => [entry.mode, entry.count]));
+    const providerConfigs = [...memory.providerConfigs];
 
     for (const provider of restProviders) {
       const nextMemory = provider.getMemory();
       memory.entries.push(...nextMemory.entries);
+      providerConfigs.push(...nextMemory.providerConfigs);
       memory.totalThreads += nextMemory.totalThreads;
 
       for (const entry of nextMemory.modeCounts) {
@@ -157,6 +159,7 @@ export class CompositeProvider implements MonitorProviderAdapter {
     memory.modeCounts = Array.from(modeCountMap.entries())
       .map(([mode, count]) => ({ mode, count }))
       .sort((left, right) => right.count - left.count || left.mode.localeCompare(right.mode));
+    memory.providerConfigs = providerConfigs;
 
     return memory;
   }

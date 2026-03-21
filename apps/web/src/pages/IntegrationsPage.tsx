@@ -152,21 +152,71 @@ export function IntegrationsPage() {
             </div>
 
             <Panel title="Skills" subtitle="Name" icon={<Settings2 size={16} strokeWidth={2.2} />}>
-              <div className="compact-skill-grid">
-                {integrations.data.skills.map((skill) => (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    className="detail-row skill-name-row"
-                    onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
-                  >
-                    <div className="skill-name-row-header">
-                      <h3>{skill.name}</h3>
-                      <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                const codexSkills = integrations.data.skills.filter((skill) => skill.source === "codex" || skill.source === "agents");
+                const claudeSkills = integrations.data.skills.filter((skill) => skill.source === "claude-code");
+
+                return (
+                  <div className="fold-list">
+                    {codexSkills.length > 0 ? (
+                      <details className="fold-panel" open>
+                        <summary className="fold-summary">
+                          <div className="fold-summary-main">
+                            <Settings2 size={15} strokeWidth={2.2} />
+                            <strong>Codex</strong>
+                          </div>
+                          <span>{codexSkills.length}</span>
+                        </summary>
+                        <div className="fold-content">
+                          <div className="compact-skill-grid">
+                            {codexSkills.map((skill) => (
+                              <button
+                                key={skill.id}
+                                type="button"
+                                className="detail-row skill-name-row"
+                                onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
+                              >
+                                <div className="skill-name-row-header">
+                                  <h3>{skill.name}</h3>
+                                  <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </details>
+                    ) : null}
+                    {claudeSkills.length > 0 ? (
+                      <details className="fold-panel" open>
+                        <summary className="fold-summary">
+                          <div className="fold-summary-main">
+                            <Settings2 size={15} strokeWidth={2.2} />
+                            <strong>Claude Code</strong>
+                          </div>
+                          <span>{claudeSkills.length}</span>
+                        </summary>
+                        <div className="fold-content">
+                          <div className="compact-skill-grid">
+                            {claudeSkills.map((skill) => (
+                              <button
+                                key={skill.id}
+                                type="button"
+                                className="detail-row skill-name-row"
+                                onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
+                              >
+                                <div className="skill-name-row-header">
+                                  <h3>{skill.name}</h3>
+                                  <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </Panel>
           </>
         ) : null}
