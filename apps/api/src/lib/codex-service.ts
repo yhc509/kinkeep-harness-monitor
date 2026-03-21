@@ -253,6 +253,7 @@ export class CodexDataService implements MonitorProviderAdapter {
           id: project.projectId,
           name: project.projectName,
           path: project.projectPath,
+          providers: ["codex"],
           sessionCount: session.isSubagent ? 0 : 1,
           subagentCount: session.isSubagent ? 1 : 0,
           updatedAt: session.updatedAt,

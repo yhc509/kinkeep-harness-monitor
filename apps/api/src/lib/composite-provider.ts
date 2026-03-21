@@ -108,6 +108,7 @@ export class CompositeProvider implements MonitorProviderAdapter {
 
       existing.sessionCount += project.sessionCount;
       existing.subagentCount += project.subagentCount;
+      existing.providers = [...new Set([...existing.providers, ...project.providers])];
       if (updatedAtEpoch >= existing.updatedAtEpoch) {
         existing.updatedAtEpoch = updatedAtEpoch;
         existing.updatedAt = project.updatedAt;

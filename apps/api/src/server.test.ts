@@ -68,6 +68,7 @@ describe("API server", () => {
       url: "/api/projects"
     });
     expect(projects.statusCode).toBe(200);
+    expect(projects.json()[0].providers).toEqual(["codex"]);
     expect(projects.json()[0].sessionCount).toBe(2);
     expect(projects.json()[0].subagentCount).toBe(2);
 

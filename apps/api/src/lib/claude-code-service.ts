@@ -192,6 +192,7 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
           id: session.projectId,
           name: session.projectName,
           path: session.projectPath,
+          providers: ["claude-code"],
           sessionCount: 1,
           subagentCount: 0,
           updatedAt: session.updatedAt,

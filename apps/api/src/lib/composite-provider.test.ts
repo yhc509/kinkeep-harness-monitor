@@ -79,6 +79,7 @@ describe("CompositeProvider", () => {
         createProject("shared-project", {
           name: "Shared",
           path: "/workspace/shared",
+          providers: ["codex"],
           sessionCount: 1,
           subagentCount: 1,
           updatedAt: "2026-03-14T10:00:00.000Z",
@@ -97,6 +98,7 @@ describe("CompositeProvider", () => {
         createProject("shared-project", {
           name: "Shared",
           path: "/workspace/shared",
+          providers: ["claude-code"],
           sessionCount: 2,
           subagentCount: 0,
           updatedAt: "2026-03-14T12:00:00.000Z",
@@ -105,6 +107,7 @@ describe("CompositeProvider", () => {
         createProject("claude-project", {
           name: "Claude Project",
           path: "/workspace/claude-project",
+          providers: ["claude-code"],
           sessionCount: 1,
           subagentCount: 0,
           updatedAt: "2026-03-13T12:00:00.000Z",
@@ -135,6 +138,7 @@ describe("CompositeProvider", () => {
       id: "shared-project",
       name: "Shared",
       path: "/workspace/shared",
+      providers: ["codex", "claude-code"],
       sessionCount: 3,
       subagentCount: 1,
       updatedAt: "2026-03-14T12:00:00.000Z",
@@ -389,6 +393,7 @@ function createProject(id: string, overrides: Partial<ProjectSummary> = {}): Pro
     id,
     name: "Project",
     path: "/workspace/project",
+    providers: ["codex"],
     sessionCount: 1,
     subagentCount: 0,
     updatedAt: "2026-03-14T09:00:00.000Z",

@@ -4,6 +4,7 @@ export const projectSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
+  providers: z.array(z.string()),
   sessionCount: z.number(),
   subagentCount: z.number(),
   updatedAt: z.string(),

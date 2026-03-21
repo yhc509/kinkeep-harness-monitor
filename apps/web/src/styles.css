@@ -1670,13 +1670,21 @@ pre {
   line-height: 1.35;
 }
 
-.title-clamp-2 {
+.title-clamp-1 {
   display: -webkit-box;
   width: 100%;
   max-width: 100%;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
+}
+
+.provider-badge-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .project-card-copy p,

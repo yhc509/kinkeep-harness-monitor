@@ -77,6 +77,7 @@ export function SessionsPage() {
             id: detail.data.projectId,
             name: detail.data.projectName,
             path: detail.data.projectPath,
+            providers: detail.data.provider ? [detail.data.provider] : [],
             sessionCount: detail.data.isSubagent ? 0 : 1,
             subagentCount: detail.data.isSubagent ? 1 : detail.data.subagents.length,
             updatedAt: detail.data.updatedAt,
@@ -88,6 +89,7 @@ export function SessionsPage() {
             id: sessions.data[0].projectId,
             name: sessions.data[0].projectName,
             path: sessions.data[0].projectPath,
+            providers: getProjectProviders(sessions.data),
             sessionCount: sessions.data.filter((session) => !session.isSubagent).length,
             subagentCount: sessions.data.filter((session) => session.isSubagent).length,
             updatedAt: sessions.data[0].updatedAt,
@@ -171,7 +173,14 @@ export function SessionsPage() {
                         <FolderOpen size={18} strokeWidth={2.2} />
                       </span>
                       <div className="project-card-copy">
-                        <strong>{project.name}</strong>
+                        <div className="session-title-row">
+                          <strong className="title-clamp-1" title={project.name}>{project.name}</strong>
+                          <div className="provider-badge-row">
+                            {project.providers
+                              .filter(isSessionProvider)
+                              .map((provider) => renderProviderBadge(provider, provider))}
+                          </div>
+                        </div>
                         <p>{project.path}</p>
                       </div>
                     </div>
@@ -261,7 +270,7 @@ export function SessionsPage() {
                       >
                         <div className="session-browser-copy">
                           <div className="session-title-row">
-                            <strong className="title-clamp-2" title={session.title}>{session.title}</strong>
+                            <strong className="title-clamp-1" title={session.title}>{session.title}</strong>
                             {renderProviderBadge(session.provider)}
                           </div>
                           <p>{toProjectRelativePath(session.cwd, session.projectPath)}</p>
@@ -285,7 +294,7 @@ export function SessionsPage() {
                                 </span>
                                 <div className="subagent-item-copy">
                                   <div className="session-title-row">
-                                    <strong className="title-clamp-2" title={formatSubagentLabel(subagent)}>
+                                    <strong className="title-clamp-1" title={formatSubagentLabel(subagent)}>
                                       {formatSubagentLabel(subagent)}
                                     </strong>
                                     {renderProviderBadge(subagent.provider)}
@@ -317,7 +326,7 @@ export function SessionsPage() {
                               </span>
                               <div className="subagent-item-copy">
                                 <div className="session-title-row">
-                                  <strong className="title-clamp-2" title={formatSubagentLabel(subagent)}>
+                                  <strong className="title-clamp-1" title={formatSubagentLabel(subagent)}>
                                     {formatSubagentLabel(subagent)}
                                   </strong>
                                   {renderProviderBadge(subagent.provider)}
@@ -519,6 +528,14 @@ function formatSubagentLabel(session: {
   return `${nickname} · ${role}`;
 }
 
+function getProjectProviders(sessions: SessionListItem[]): Array<NonNullable<SessionListItem["provider"]>> {
+  return Array.from(new Set(sessions.flatMap((session) => session.provider ? [session.provider] : [])));
+}
+
+function isSessionProvider(provider: string): provider is NonNullable<SessionListItem["provider"]> {
+  return provider === "codex" || provider === "claude-code";
+}
+
 function summarizeSubagentRoles(subagents: SubagentSummary[]): Array<[string, number]> {
   const counts = new Map<string, number>();
 
@@ -530,7 +547,7 @@ function summarizeSubagentRoles(subagents: SubagentSummary[]): Array<[string, nu
   return Array.from(counts.entries()).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
 }
 
-function renderProviderBadge(provider?: SessionListItem["provider"] | null) {
+function renderProviderBadge(provider?: SessionListItem["provider"] | null, key?: string) {
   const providerClass = getProviderThemeClassName(provider);
-  return <span className={`provider-badge ${providerClass}`}>{getProviderLabel(provider)}</span>;
+  return <span key={key} className={`provider-badge ${providerClass}`}>{getProviderLabel(provider)}</span>;
 }

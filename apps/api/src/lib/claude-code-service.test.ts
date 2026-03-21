@@ -31,6 +31,7 @@ describe("ClaudeCodeDataService", () => {
     expect(projects).toHaveLength(2);
     expect(projects[0]).toMatchObject({
       name: "claudeproject",
+      providers: ["claude-code"],
       sessionCount: 1,
       subagentCount: 0,
       lastSessionTitle: "Investigate failing tests"

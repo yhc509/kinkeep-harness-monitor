@@ -42,6 +42,7 @@ describe("CodexDataService", () => {
     const projects = service.listProjects();
     expect(projects).toHaveLength(3);
     expect(projects[0]?.name).toBe("demo-project");
+    expect(projects[0]?.providers).toEqual(["codex"]);
     expect(projects[0]?.sessionCount).toBe(2);
     expect(projects[0]?.subagentCount).toBe(2);
 
@@ -56,6 +57,7 @@ describe("CodexDataService", () => {
     expect(gitSessionsWithSubagents.find((session) => session.id === "thread-5")?.parentThreadId).toBe("thread-1");
 
     const standalone = projects.find((project) => project.name === "scratchpad");
+    expect(standalone?.providers).toEqual(["codex"]);
     expect(standalone?.path.endsWith("/scratchpad")).toBe(true);
   });
 
