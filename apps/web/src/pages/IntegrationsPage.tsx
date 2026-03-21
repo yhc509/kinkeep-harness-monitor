@@ -157,63 +157,68 @@ export function IntegrationsPage() {
                 const claudeSkills = integrations.data.skills.filter((skill) => skill.source === "claude-code");
 
                 return (
-                  <div className="fold-list">
-                    {codexSkills.length > 0 ? (
-                      <details className="fold-panel" open>
-                        <summary className="fold-summary">
-                          <div className="fold-summary-main">
-                            <Settings2 size={15} strokeWidth={2.2} />
-                            <strong>Codex</strong>
-                          </div>
-                          <span>{codexSkills.length}</span>
-                        </summary>
-                        <div className="fold-content">
-                          <div className="compact-skill-grid">
-                            {codexSkills.map((skill) => (
-                              <button
-                                key={skill.id}
-                                type="button"
-                                className="detail-row skill-name-row"
-                                onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
-                              >
-                                <div className="skill-name-row-header">
-                                  <h3>{skill.name}</h3>
-                                  <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
+                  <div className="skills-provider-columns">
+                    <div className="skills-provider-column">
+                      <div className="memory-provider-header provider-codex">
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <Settings2 size={16} strokeWidth={2.2} />
+                          <strong>Codex</strong>
                         </div>
-                      </details>
-                    ) : null}
-                    {claudeSkills.length > 0 ? (
-                      <details className="fold-panel" open>
-                        <summary className="fold-summary">
-                          <div className="fold-summary-main">
-                            <Settings2 size={15} strokeWidth={2.2} />
-                            <strong>Claude Code</strong>
+                        <span className="panel-badge">{codexSkills.length}</span>
+                      </div>
+                      <div className="compact-skill-grid">
+                        {codexSkills.length > 0 ? (
+                          codexSkills.map((skill) => (
+                            <button
+                              key={skill.id}
+                              type="button"
+                              className="detail-row skill-name-row"
+                              onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
+                            >
+                              <div className="skill-name-row-header">
+                                <h3>{skill.name}</h3>
+                                <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="memory-inline-empty">
+                            <span>No Codex skills</span>
                           </div>
-                          <span>{claudeSkills.length}</span>
-                        </summary>
-                        <div className="fold-content">
-                          <div className="compact-skill-grid">
-                            {claudeSkills.map((skill) => (
-                              <button
-                                key={skill.id}
-                                type="button"
-                                className="detail-row skill-name-row"
-                                onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
-                              >
-                                <div className="skill-name-row-header">
-                                  <h3>{skill.name}</h3>
-                                  <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="skills-provider-column">
+                      <div className="memory-provider-header provider-claude-code">
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <Settings2 size={16} strokeWidth={2.2} />
+                          <strong>Claude Code</strong>
                         </div>
-                      </details>
-                    ) : null}
+                        <span className="panel-badge">{claudeSkills.length}</span>
+                      </div>
+                      <div className="compact-skill-grid">
+                        {claudeSkills.length > 0 ? (
+                          claudeSkills.map((skill) => (
+                            <button
+                              key={skill.id}
+                              type="button"
+                              className="detail-row skill-name-row"
+                              onClick={() => setDetailTarget({ type: "skill", id: skill.id })}
+                            >
+                              <div className="skill-name-row-header">
+                                <h3>{skill.name}</h3>
+                                <span className={`skill-source ${skill.source}`}>{getSourceThemeLabel(skill.source)}</span>
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="memory-inline-empty">
+                            <span>No Claude Code skills</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
