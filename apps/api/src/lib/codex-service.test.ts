@@ -92,6 +92,7 @@ describe("CodexDataService", () => {
     expect(integrations.hooks[0]?.name).toBe("notify");
     expect(integrations.hooks[0]?.preview).toContain("notify-hook");
     expect(integrations.mcpServers[0]?.name).toBe("openaiDeveloperDocs");
+    expect(integrations.mcpServers[0]?.source).toBe("codex");
     expect(integrations.mcpServers[0]?.usageCount).toBe(1);
     expect(integrations.skills).toHaveLength(2);
     expect(integrations.lastSyncedAt).not.toBeNull();

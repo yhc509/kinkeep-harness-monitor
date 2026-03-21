@@ -208,6 +208,7 @@ export const memoryResponseSchema = z.object({
 
 export const mcpServerSummarySchema = z.object({
   name: z.string(),
+  source: z.string(),
   url: z.string().nullable(),
   usageCount: z.number(),
   toolNames: z.array(z.string())

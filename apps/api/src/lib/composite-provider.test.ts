@@ -187,7 +187,7 @@ describe("CompositeProvider", () => {
         }]
       }),
       integrations: createIntegrations({
-        mcpServers: [{ name: "docs-a", url: null, usageCount: 1, toolNames: ["search"] }],
+        mcpServers: [{ name: "docs-a", source: "codex", url: null, usageCount: 1, toolNames: ["search"] }],
         skills: [{ id: "skill-a", name: "Skill A", description: "A", source: "codex" }],
         hooks: [{ id: "hook-a", name: "Hook A", preview: "echo a", kind: "shell", source: "codex" }]
       }),
@@ -236,7 +236,7 @@ describe("CompositeProvider", () => {
         }]
       }),
       integrations: createIntegrations({
-        mcpServers: [{ name: "docs-b", url: "https://example.com", usageCount: 2, toolNames: ["fetch"] }],
+        mcpServers: [{ name: "docs-b", source: "claude-code", url: "https://example.com", usageCount: 2, toolNames: ["fetch"] }],
         skills: [{ id: "skill-b", name: "Skill B", description: "B", source: "claude-code" }],
         hooks: [{ id: "hook-b", name: "Hook B", preview: "echo b", kind: "shell", source: "claude-code" }]
       }),

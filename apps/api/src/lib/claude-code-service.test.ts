@@ -122,12 +122,14 @@ describe("ClaudeCodeDataService", () => {
     expect(integrations.mcpServers).toEqual([
       {
         name: "docs",
+        source: "claude-code",
         url: null,
         usageCount: 0,
         toolNames: []
       },
       {
         name: "localtools",
+        source: "claude-code",
         url: null,
         usageCount: 0,
         toolNames: []

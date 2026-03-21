@@ -300,6 +300,7 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
     return integrationsResponseSchema.parse({
       mcpServers: settings.mcpServers.map((server) => ({
         name: server.name,
+        source: "claude-code",
         url: server.url,
         usageCount: 0,
         toolNames: []

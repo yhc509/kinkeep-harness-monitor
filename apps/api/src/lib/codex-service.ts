@@ -447,7 +447,7 @@ export class CodexDataService implements MonitorProviderAdapter {
     }
 
     const usageMap = this.readIndexedMcpUsage();
-    const mcpServers = mergeMcpServers(configData.mcpServers, usageMap);
+    const mcpServers = mergeMcpServers(configData.mcpServers, usageMap, "codex");
     const skills = this.getSkillInventory();
 
     return integrationsResponseSchema.parse({
@@ -1257,7 +1257,8 @@ function hasTable(database: DatabaseSync, tableName: string): boolean {
 
 function mergeMcpServers(
   configuredServers: Array<{ name: string; url: string | null }>,
-  usageMap: Map<string, { usageCount: number; toolNames: Set<string> }>
+  usageMap: Map<string, { usageCount: number; toolNames: Set<string> }>,
+  source: McpServerSummary["source"]
 ): McpServerSummary[] {
   const names = new Set<string>([
     ...configuredServers.map((server) => server.name),
@@ -1271,6 +1272,7 @@ function mergeMcpServers(
       const usage = usageMap.get(name);
       return {
         name,
+        source,
         url: configured?.url ?? null,
         usageCount: usage?.usageCount ?? 0,
         toolNames: Array.from(usage?.toolNames ?? []).sort()

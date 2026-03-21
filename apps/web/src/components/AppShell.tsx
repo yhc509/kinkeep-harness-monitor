@@ -1,4 +1,4 @@
-import { Blocks, Brain, ChartColumnBig, LayoutDashboard, MessagesSquare } from "lucide-react";
+import { Brain, ChartColumnBig, LayoutDashboard, MessagesSquare, PlugZap, Settings2, Wrench } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { prefetchRoute } from "../route-prefetch";
 
@@ -6,7 +6,9 @@ const navItems = [
   { to: "/", label: "Dashboard", end: true, icon: LayoutDashboard },
   { to: "/sessions", label: "Sessions", icon: MessagesSquare },
   { to: "/memory", label: "Memory", icon: Brain },
-  { to: "/integrations", label: "Integrations", icon: Blocks },
+  { to: "/mcp", label: "MCP", icon: PlugZap },
+  { to: "/hooks", label: "Hooks", icon: Wrench },
+  { to: "/skills", label: "Skills", icon: Settings2 },
   { to: "/tokens", label: "Tokens", icon: ChartColumnBig }
 ];
 
