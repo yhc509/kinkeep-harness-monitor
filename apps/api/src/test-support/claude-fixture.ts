@@ -8,6 +8,8 @@ export interface ClaudeCodeTestFixture {
   claudeHome: string;
   primarySessionId: string;
   fallbackSessionId: string;
+  mixedContentSessionId: string;
+  emptyContentSessionId: string;
   primaryRolloutPath: string;
   config: AppConfig;
   cleanup: () => void;
@@ -24,6 +26,8 @@ export function createClaudeCodeTestFixture(options: { includeAssistantUsage?: b
   const primarySessionId = "session-alpha";
   const secondarySessionId = "session-beta";
   const fallbackSessionId = "session-fallback";
+  const mixedContentSessionId = "session-mixed-content";
+  const emptyContentSessionId = "session-empty-content";
   const primaryProjectDir = path.join(claudeHome, "projects", encodeClaudePath(projectRoot));
   const secondaryProjectDir = path.join(claudeHome, "projects", encodeClaudePath(notesRoot));
   const transcriptsDir = path.join(claudeHome, "transcripts");
@@ -45,6 +49,13 @@ export function createClaudeCodeTestFixture(options: { includeAssistantUsage?: b
 
   fs.writeFileSync(path.join(primaryProjectDir, "CLAUDE.md"), "# Project instructions\n", "utf8");
   fs.writeFileSync(path.join(primaryProjectDir, "memory", "notes.md"), "Remember this later\n", "utf8");
+  fs.writeFileSync(path.join(primaryProjectDir, "memory", "coding-style.md"), `---
+name: Coding Style
+description: Preferred coding conventions
+---
+
+Use TypeScript strict mode
+`, "utf8");
 
   const includeAssistantUsage = options.includeAssistantUsage ?? true;
 
@@ -96,9 +107,17 @@ export function createClaudeCodeTestFixture(options: { includeAssistantUsage?: b
       timestamp: "2026-03-18T01:00:05.000Z"
     },
     {
-      type: "tool_result",
-      tool_use_id: "toolu_1",
-      content: "1 failed assertion",
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_1",
+            content: "1 failed assertion"
+          }
+        ]
+      },
       timestamp: "2026-03-18T01:00:07.000Z"
     },
     {
@@ -154,6 +173,61 @@ export function createClaudeCodeTestFixture(options: { includeAssistantUsage?: b
         ]
       },
       timestamp: "2026-03-16T08:00:05.000Z"
+    }
+  ]);
+
+  writeJsonl(path.join(transcriptsDir, `ses_${mixedContentSessionId}.jsonl`), [
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Review the failing tool output"
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_mixed",
+            content: "1 failed assertion"
+          },
+          {
+            type: "text",
+            text: "Summarize the next debugging step"
+          }
+        ]
+      },
+      timestamp: "2026-03-15T07:00:00.000Z",
+      sessionId: mixedContentSessionId,
+      cwd: projectApp,
+      version: "1.0.0"
+    }
+  ]);
+
+  writeJsonl(path.join(transcriptsDir, `ses_${emptyContentSessionId}.jsonl`), [
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: []
+      },
+      timestamp: "2026-03-15T06:00:00.000Z",
+      sessionId: emptyContentSessionId,
+      cwd: projectApp,
+      version: "1.0.0"
+    },
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "No visible user content to render."
+          }
+        ]
+      },
+      timestamp: "2026-03-15T06:00:05.000Z"
     }
   ]);
 
@@ -266,6 +340,8 @@ Planning workflow for Claude Code
     claudeHome,
     primarySessionId,
     fallbackSessionId,
+    mixedContentSessionId,
+    emptyContentSessionId,
     primaryRolloutPath,
     config,
     cleanup: () => fs.rmSync(rootDir, { recursive: true, force: true })

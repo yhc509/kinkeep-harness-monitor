@@ -108,6 +108,17 @@ interface TimelineParseResult {
   firstUserMessage: string;
 }
 
+type ClaudeUserContentPart =
+  | {
+    kind: "text";
+    body: string;
+  }
+  | {
+    kind: "tool_result";
+    body: string;
+    toolUseId: string | null;
+  };
+
 export class ClaudeCodeDataService implements MonitorProviderAdapter {
   readonly id = "claude-code" as const;
   private sessionIndexCache: SessionIndexCacheEntry | null = null;
@@ -192,6 +203,7 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
           id: session.projectId,
           name: session.projectName,
           path: session.projectPath,
+          providers: ["claude-code"],
           sessionCount: 1,
           subagentCount: 0,
           updatedAt: session.updatedAt,
@@ -248,20 +260,48 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
   }
 
   getMemory(): MemoryResponse {
-    scanClaudeMemoryFiles(this.getSessionRoot());
+    const memoryFiles = scanClaudeMemoryFiles(this.getSessionRoot());
     const totalSessions = this.getSessionRecords().length;
+    const devInstructions = this.readDeveloperInstructions();
+    const entries = memoryFiles.map((filePath) => {
+      const content = fs.readFileSync(filePath, "utf8");
+      const frontmatter = extractFrontmatter(content);
+      const bodyContent = stripFrontmatter(content).trim();
+      const stat = fs.statSync(filePath);
+      const fallbackTitle = path.basename(filePath, ".md");
+
+      return {
+        provider: "claude-code",
+        threadId: filePath,
+        title: frontmatter.name ?? fallbackTitle,
+        rawMemory: bodyContent,
+        rolloutSummary: frontmatter.description ?? "",
+        usageCount: null,
+        lastUsage: null,
+        generatedAt: toLocalDateTime(stat.mtimeMs) ?? ""
+      };
+    });
+    const providerConfigs = [{
+      provider: "claude-code" as const,
+      developerInstructions: devInstructions,
+      personality: null,
+      sourceStatus: entries.length > 0 ? "ready" as const : "empty" as const,
+      entryCount: entries.length,
+      totalThreads: totalSessions
+    }];
 
     return memoryResponseSchema.parse({
-      entries: [],
+      entries,
+      providerConfigs,
       modeCounts: [{
         mode: "enabled",
         count: totalSessions
       }],
       totalThreads: totalSessions,
       hasStage1OutputsTable: false,
-      stage1OutputCount: 0,
-      sourceStatus: "unsupported",
-      developerInstructions: null,
+      stage1OutputCount: entries.length,
+      sourceStatus: entries.length > 0 ? "ready" : "empty",
+      developerInstructions: devInstructions,
       personality: null
     });
   }
@@ -272,6 +312,7 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
     return integrationsResponseSchema.parse({
       mcpServers: settings.mcpServers.map((server) => ({
         name: server.name,
+        source: "claude-code",
         url: server.url,
         usageCount: 0,
         toolNames: []
@@ -526,6 +567,25 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
     }
   }
 
+  private readDeveloperInstructions(): string | null {
+    const sessionRoot = this.getSessionRoot();
+    if (!fs.existsSync(sessionRoot)) {
+      return null;
+    }
+
+    const projectDirs = fs.readdirSync(sessionRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory());
+
+    for (const dir of projectDirs) {
+      const claudeMdPath = path.join(sessionRoot, dir.name, "CLAUDE.md");
+      if (fs.existsSync(claudeMdPath)) {
+        return fs.readFileSync(claudeMdPath, "utf8");
+      }
+    }
+
+    return null;
+  }
+
   private resolveProjectInfo(cwd: string): ResolvedProjectInfo {
     const resolvedCwd = path.resolve(cwd);
     const cached = this.projectInfoCache.get(resolvedCwd);
@@ -608,20 +668,36 @@ function parseClaudeTimeline(filePath: string): TimelineParseResult {
     const timestamp = toLocalDateTime(readClaudeTimestamp(entry)) ?? "";
 
     if (type === "user") {
-      const body = extractClaudeMessageText(isRecord(entry.message) ? entry.message.content : null);
-      if (!firstUserMessage && body) {
-        firstUserMessage = body;
-      }
+      const parts = extractClaudeUserContentParts(isRecord(entry.message) ? entry.message.content : null);
+      for (const part of parts) {
+        if (part.kind === "tool_result") {
+          const toolName = part.toolUseId ? toolNames.get(part.toolUseId) ?? null : null;
+          pushTimelineItem({
+            timestamp,
+            kind: "tool_result",
+            role: "tool",
+            title: toolName ? `Tool result: ${toolName}` : "Tool result",
+            body: part.body,
+            toolName,
+            metadata: part.toolUseId ? { toolUseId: part.toolUseId } : {}
+          });
+          continue;
+        }
 
-      pushTimelineItem({
-        timestamp,
-        kind: "user_message",
-        role: "user",
-        title: createPreview(body || "User message"),
-        body,
-        toolName: null,
-        metadata: {}
-      });
+        if (!firstUserMessage && part.body) {
+          firstUserMessage = part.body;
+        }
+
+        pushTimelineItem({
+          timestamp,
+          kind: "user_message",
+          role: "user",
+          title: createPreview(part.body || "User message"),
+          body: part.body,
+          toolName: null,
+          metadata: {}
+        });
+      }
       continue;
     }
 
@@ -786,12 +862,19 @@ function readClaudeJsonl(filePath: string): Array<Record<string, unknown>> {
 }
 
 function extractFirstUserMessage(entries: Array<Record<string, unknown>>): string {
-  const firstUserEntry = entries.find((entry) => entry.type === "user");
-  if (!firstUserEntry) {
-    return "";
+  for (const entry of entries) {
+    if (entry.type !== "user") {
+      continue;
+    }
+
+    const parts = extractClaudeUserContentParts(isRecord(entry.message) ? entry.message.content : null);
+    const textPart = parts.find((part) => part.kind === "text");
+    if (textPart) {
+      return textPart.body;
+    }
   }
 
-  return extractClaudeMessageText(isRecord(firstUserEntry.message) ? firstUserEntry.message.content : null);
+  return "";
 }
 
 function readClaudeTimestamp(entry: Record<string, unknown> | null): string | number | null {
@@ -823,6 +906,65 @@ function readClaudeEntrypoint(entry: Record<string, unknown> | null): string | n
 
   const entrypoint = entry.entrypoint;
   return typeof entrypoint === "string" && entrypoint.trim() ? entrypoint.trim() : null;
+}
+
+function extractClaudeUserContentParts(content: unknown): ClaudeUserContentPart[] {
+  if (typeof content === "string") {
+    const body = content.trim();
+    return body ? [{ kind: "text", body }] : [];
+  }
+
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const parts: ClaudeUserContentPart[] = [];
+  const textBlocks: string[] = [];
+  const flushTextBlocks = () => {
+    if (textBlocks.length === 0) {
+      return;
+    }
+
+    const body = textBlocks.join("\n\n").trim();
+    textBlocks.length = 0;
+    if (body) {
+      parts.push({ kind: "text", body });
+    }
+  };
+
+  for (const entry of content) {
+    if (typeof entry === "string") {
+      const body = entry.trim();
+      if (body) {
+        textBlocks.push(body);
+      }
+      continue;
+    }
+
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    if (entry.type === "tool_result") {
+      flushTextBlocks();
+      parts.push({
+        kind: "tool_result",
+        body: extractClaudeContentBody(entry.content),
+        toolUseId: typeof entry.tool_use_id === "string" ? entry.tool_use_id : null
+      });
+      continue;
+    }
+
+    if (entry.type === "text") {
+      const body = typeof entry.text === "string" ? entry.text.trim() : "";
+      if (body) {
+        textBlocks.push(body);
+      }
+    }
+  }
+
+  flushTextBlocks();
+  return parts;
 }
 
 function extractClaudeMessageText(content: unknown): string {
@@ -1074,7 +1216,9 @@ function scanClaudeSkills(baseDir: string): SkillRecord[] {
 
   for (const entry of entries) {
     const fullPath = path.join(baseDir, entry.name);
-    if (entry.isDirectory()) {
+    const entryType = getClaudeSkillEntryType(entry, fullPath);
+
+    if (entryType === "directory") {
       const markdownFile = findClaudeSkillMarkdown(fullPath);
       if (!markdownFile) {
         continue;
@@ -1091,7 +1235,7 @@ function scanClaudeSkills(baseDir: string): SkillRecord[] {
       continue;
     }
 
-    if (entry.isFile() && entry.name.endsWith(".md")) {
+    if (entryType === "file" && entry.name.endsWith(".md")) {
       const parsed = parseClaudeSkillFile(fullPath, path.basename(entry.name, ".md"));
       records.push({
         id: createSkillId(fullPath),
@@ -1106,9 +1250,41 @@ function scanClaudeSkills(baseDir: string): SkillRecord[] {
   return records;
 }
 
+function getClaudeSkillEntryType(entry: fs.Dirent<string>, fullPath: string): "directory" | "file" | null {
+  if (entry.isDirectory()) {
+    return "directory";
+  }
+
+  if (entry.isFile()) {
+    return "file";
+  }
+
+  if (!entry.isSymbolicLink()) {
+    return null;
+  }
+
+  try {
+    const stats = fs.statSync(fullPath);
+    if (stats.isDirectory()) {
+      return "directory";
+    }
+
+    if (stats.isFile()) {
+      return "file";
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 function findClaudeSkillMarkdown(skillDir: string): string | null {
   const files = fs.readdirSync(skillDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .filter((entry) => (
+      getClaudeSkillEntryType(entry, path.join(skillDir, entry.name)) === "file"
+      && entry.name.endsWith(".md")
+    ))
     .sort((left, right) => {
       if (left.name === "SKILL.md") {
         return -1;
@@ -1167,6 +1343,19 @@ function extractFrontmatter(content: string): { name: string | null; description
   }
 
   return { name, description };
+}
+
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---")) {
+    return content;
+  }
+
+  const endIndex = content.indexOf("\n---", 3);
+  if (endIndex === -1) {
+    return content;
+  }
+
+  return content.slice(endIndex + 4);
 }
 
 function normalizeSkillField(value: string): string {

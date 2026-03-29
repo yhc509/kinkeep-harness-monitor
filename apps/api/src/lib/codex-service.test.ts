@@ -42,6 +42,7 @@ describe("CodexDataService", () => {
     const projects = service.listProjects();
     expect(projects).toHaveLength(3);
     expect(projects[0]?.name).toBe("demo-project");
+    expect(projects[0]?.providers).toEqual(["codex"]);
     expect(projects[0]?.sessionCount).toBe(2);
     expect(projects[0]?.subagentCount).toBe(2);
 
@@ -56,6 +57,7 @@ describe("CodexDataService", () => {
     expect(gitSessionsWithSubagents.find((session) => session.id === "thread-5")?.parentThreadId).toBe("thread-1");
 
     const standalone = projects.find((project) => project.name === "scratchpad");
+    expect(standalone?.providers).toEqual(["codex"]);
     expect(standalone?.path.endsWith("/scratchpad")).toBe(true);
   });
 
@@ -79,16 +81,20 @@ describe("CodexDataService", () => {
 
     const memory = service.getMemory();
     expect(memory.entries[0]?.rawMemory).toBe("Remembered memory");
+    expect(memory.entries[0]?.provider).toBe("codex");
     expect(memory.sourceStatus).toBe("ready");
     expect(memory.stage1OutputCount).toBe(1);
     expect(memory.developerInstructions).toContain("root causes");
     expect(memory.personality).toBe("friendly");
+    expect(memory.providerConfigs).toHaveLength(1);
+    expect(memory.providerConfigs[0]).toMatchObject({ provider: "codex", sourceStatus: "ready" });
 
     service.refreshIntegrationsUsage(new Date("2026-03-14T10:15:00+09:00"));
     const integrations = service.getIntegrations();
     expect(integrations.hooks[0]?.name).toBe("notify");
     expect(integrations.hooks[0]?.preview).toContain("notify-hook");
     expect(integrations.mcpServers[0]?.name).toBe("openaiDeveloperDocs");
+    expect(integrations.mcpServers[0]?.source).toBe("codex");
     expect(integrations.mcpServers[0]?.usageCount).toBe(1);
     expect(integrations.skills).toHaveLength(2);
     expect(integrations.lastSyncedAt).not.toBeNull();

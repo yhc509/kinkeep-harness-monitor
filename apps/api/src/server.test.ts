@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "./server";
 import { createTestFixture } from "./test-support/fixture";
 
 const fixtures: Array<ReturnType<typeof createTestFixture>> = [];
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-14T19:10:00+09:00"));
+});
+
 afterEach(async () => {
+  vi.useRealTimers();
   while (fixtures.length > 0) {
     fixtures.pop()?.cleanup();
   }
@@ -43,9 +49,9 @@ describe("API server", () => {
     expect(overview.json().daily).toHaveLength(7);
     expect(overview.json().heatmapDaily).toHaveLength(365);
     expect(overview.json().stats.todayTokens).toEqual({
-      totalTokens: 0,
-      cachedInputTokens: 0,
-      uncachedTokens: 0
+      totalTokens: 140,
+      cachedInputTokens: 20,
+      uncachedTokens: 120
     });
 
     const session = await app.inject({
@@ -62,6 +68,7 @@ describe("API server", () => {
       url: "/api/projects"
     });
     expect(projects.statusCode).toBe(200);
+    expect(projects.json()[0].providers).toEqual(["codex"]);
     expect(projects.json()[0].sessionCount).toBe(2);
     expect(projects.json()[0].subagentCount).toBe(2);
 

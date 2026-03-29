@@ -253,6 +253,7 @@ export class CodexDataService implements MonitorProviderAdapter {
           id: project.projectId,
           name: project.projectName,
           path: project.projectPath,
+          providers: ["codex"],
           sessionCount: session.isSubagent ? 0 : 1,
           subagentCount: session.isSubagent ? 1 : 0,
           updatedAt: session.updatedAt,
@@ -396,6 +397,7 @@ export class CodexDataService implements MonitorProviderAdapter {
       }>;
 
       entries = rows.map((row) => ({
+        provider: "codex",
         threadId: row.thread_id,
         title: row.title,
         rawMemory: row.raw_memory,
@@ -411,9 +413,18 @@ export class CodexDataService implements MonitorProviderAdapter {
     const sourceStatus = hasStage1OutputsTable
       ? (stage1OutputCount > 0 ? "ready" : "empty")
       : "unsupported";
+    const providerConfigs = [{
+      provider: "codex" as const,
+      developerInstructions: configData.developerInstructions,
+      personality: configData.personality,
+      sourceStatus,
+      entryCount: entries.length,
+      totalThreads: totalThreads.count
+    }];
 
     return memoryResponseSchema.parse({
       entries,
+      providerConfigs,
       modeCounts: modeRows.map((row) => ({
         mode: row.mode,
         count: row.count
@@ -437,7 +448,7 @@ export class CodexDataService implements MonitorProviderAdapter {
     }
 
     const usageMap = this.readIndexedMcpUsage();
-    const mcpServers = mergeMcpServers(configData.mcpServers, usageMap);
+    const mcpServers = mergeMcpServers(configData.mcpServers, usageMap, "codex");
     const skills = this.getSkillInventory();
 
     return integrationsResponseSchema.parse({
@@ -1247,7 +1258,8 @@ function hasTable(database: DatabaseSync, tableName: string): boolean {
 
 function mergeMcpServers(
   configuredServers: Array<{ name: string; url: string | null }>,
-  usageMap: Map<string, { usageCount: number; toolNames: Set<string> }>
+  usageMap: Map<string, { usageCount: number; toolNames: Set<string> }>,
+  source: McpServerSummary["source"]
 ): McpServerSummary[] {
   const names = new Set<string>([
     ...configuredServers.map((server) => server.name),
@@ -1261,6 +1273,7 @@ function mergeMcpServers(
       const usage = usageMap.get(name);
       return {
         name,
+        source,
         url: configured?.url ?? null,
         usageCount: usage?.usageCount ?? 0,
         toolNames: Array.from(usage?.toolNames ?? []).sort()

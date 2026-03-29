@@ -1,10 +1,10 @@
-import type { MemoryResponse } from "@codex-monitor/shared";
-import { BookMarked, Brain, Clock3, UserRound } from "lucide-react";
+import { BookMarked, Brain, Clock3 } from "lucide-react";
 import { apiResourceKeys, getMemory } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
 import { Panel } from "../components/Panel";
 import { useApiResource } from "../hooks/useApiResource";
 import { formatDateTime, formatNumber } from "../utils/format";
+import { getProviderLabel, getProviderThemeClassName, type ProviderId } from "../utils/providerTheme";
 
 export function MemoryPage() {
   const memory = useApiResource(() => getMemory(), {
@@ -12,141 +12,125 @@ export function MemoryPage() {
     cacheKey: apiResourceKeys.memory,
     staleTimeMs: 15_000
   });
-  const hasEntries = (memory.data?.entries.length ?? 0) > 0;
+  const providerGroups = (memory.data?.providerConfigs ?? []).map((config) => ({
+    provider: config.provider,
+    config,
+    entries: (memory.data?.entries ?? []).filter((entry) => entry.provider === config.provider)
+  }));
+  const providerCount = providerGroups.length;
+  const headingSubtle = memory.data
+    ? `Based on ${formatNumber(providerCount)} provider${providerCount === 1 ? "" : "s"}`
+    : "Based on provider settings";
 
   return (
     <div className="page-stack">
       <section className="page-heading memory-heading">
         <div>
           <p className="eyebrow">MEMORY</p>
-          <h2>Preferences</h2>
-          <p className="heading-subtle">Based on Codex settings</p>
+          <h2>Preferences &amp; Memory</h2>
+          <p className="heading-subtle">{headingSubtle}</p>
         </div>
-        {memory.data?.personality ? (
-          <div className="page-chip-group">
-            <div className="page-chip">
-              <UserRound size={14} strokeWidth={2.2} />
-              <span>{memory.data.personality}</span>
-            </div>
-          </div>
-        ) : null}
       </section>
 
       <Panel
-        title="Preferences"
-        subtitle="developer_instructions"
+        title="Preferences & Memory"
+        subtitle="provider split view"
         icon={<Brain size={16} strokeWidth={2.2} />}
       >
         <AsyncPane loading={memory.initialLoading} error={memory.error} hasData={memory.hasData}>
           {memory.data ? (
-            <div className="memory-layout">
-              <section className="preference-card">
-                <div className="preference-card-header">
-                  <div>
-                    <p className="eyebrow">PREFERENCE</p>
-                    <h3>Preferences</h3>
-                  </div>
-                  {memory.data.personality ? (
-                    <span className="panel-badge">{memory.data.personality}</span>
-                  ) : null}
-                </div>
-                <pre className="preference-body">{memory.data.developerInstructions || "No settings"}</pre>
-              </section>
+            <>
+              <div className={`memory-provider-columns${providerCount === 1 ? " single-provider" : ""}`}>
+                {providerGroups.map((group) => {
+                  const provider = group.provider as ProviderId;
+                  const providerClassName = getProviderThemeClassName(provider);
+                  const providerLabel = getProviderLabel(provider);
 
-              <aside className="memory-status-card">
-                <div className="memory-status-row">
-                  <span>Session memory</span>
-                  <strong>{getSessionMemoryLabel(memory.data)}</strong>
-                </div>
-                <div className="memory-status-row">
-                  <span>Extracted entries</span>
-                  <strong>{formatNumber(memory.data.stage1OutputCount)}</strong>
-                </div>
-                <div className="memory-status-row">
-                  <span>threads</span>
-                  <strong>{formatNumber(memory.data.totalThreads)}</strong>
-                </div>
-              </aside>
+                  return (
+                    <details key={group.provider} open className="memory-provider-column">
+                      <summary className={`memory-provider-fold-trigger ${providerClassName}`}>
+                        {providerLabel}
+                        <span className="panel-badge">{group.entries.length}</span>
+                      </summary>
 
-              {hasEntries ? (
-                <section className="memory-section">
-                  <div className="memory-section-header">
-                    <div>
-                      <p className="eyebrow">SESSION MEMORY</p>
-                      <h3>Extracted entries</h3>
-                    </div>
-                    <div className="page-chip-group">
-                      <div className="page-chip">
-                        <BookMarked size={14} strokeWidth={2.2} />
-                        <span>{formatNumber(memory.data.entries.length)}</span>
+                      <div className={`memory-provider-header ${providerClassName}`}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <Brain size={16} strokeWidth={2.2} />
+                          <strong>{providerLabel}</strong>
+                        </div>
+                        <span className="panel-badge">{group.entries.length} entries</span>
                       </div>
-                    </div>
-                  </div>
 
-                  <div className="memory-list">
-                    {memory.data.entries.map((entry) => (
-                      <article key={entry.threadId} className="memory-card">
-                        <header>
-                          <div>
-                            <h3>{entry.title}</h3>
-                            <p>{entry.threadId}</p>
+                      {group.config.developerInstructions ? (
+                        <section className="preference-card">
+                          <div className="preference-card-header">
+                            <div>
+                              <p className="eyebrow">PREFERENCE</p>
+                              <h3>Developer Instructions</h3>
+                            </div>
+                            {group.config.personality ? (
+                              <span className="panel-badge">{group.config.personality}</span>
+                            ) : null}
                           </div>
-                          <div className="memory-meta">
-                            <span><Clock3 size={13} />{formatDateTime(entry.generatedAt)}</span>
-                            <span><BookMarked size={13} />{entry.usageCount ?? 0}</span>
-                          </div>
-                        </header>
-                        <p className="memory-summary">{entry.rolloutSummary || "No summary"}</p>
-                        <details className="inline-disclosure">
-                          <summary>raw memory</summary>
-                          <pre>{entry.rawMemory}</pre>
-                        </details>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              ) : (
-                <section className="memory-section compact-section">
-                  <div className="memory-section-header">
-                    <div>
-                      <p className="eyebrow">SESSION MEMORY</p>
-                      <h3>Extracted entries</h3>
-                    </div>
-                  </div>
-                  <div className="memory-inline-empty">
-                    <span>{getSessionMemoryLabel(memory.data)}</span>
-                    <small>{getSessionMemoryMeta(memory.data)}</small>
-                  </div>
-                </section>
-              )}
-            </div>
+                          <pre className="preference-body">{group.config.developerInstructions}</pre>
+                        </section>
+                      ) : null}
+
+                      {group.entries.length > 0 ? (
+                        <div className="memory-list">
+                          {group.entries.map((entry) => (
+                            <article
+                              key={entry.threadId}
+                              className={`memory-card provider-card ${getProviderThemeClassName(entry.provider as ProviderId)}`}
+                            >
+                              <header>
+                                <div>
+                                  <h3>{entry.title}</h3>
+                                  <p>{entry.threadId}</p>
+                                </div>
+                                <div className="memory-meta">
+                                  <span><Clock3 size={13} />{formatDateTime(entry.generatedAt)}</span>
+                                  <span><BookMarked size={13} />{entry.usageCount ?? 0}</span>
+                                </div>
+                              </header>
+                              <p className="memory-summary">{entry.rolloutSummary || "No summary"}</p>
+                              <details className="inline-disclosure">
+                                <summary>raw memory</summary>
+                                <pre>{entry.rawMemory}</pre>
+                              </details>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="memory-inline-empty">
+                          <span>
+                            {group.config.sourceStatus === "empty"
+                              ? "No extracted entries"
+                              : group.config.sourceStatus === "unsupported"
+                                ? "Unsupported"
+                                : "Extracted"}
+                          </span>
+                        </div>
+                      )}
+                    </details>
+                  );
+                })}
+              </div>
+
+              {providerCount === 0 ? (
+                <div className="memory-inline-empty">
+                  <span>No provider data</span>
+                </div>
+              ) : null}
+
+              <div className="memory-aggregate-bar">
+                <span>Total threads: <strong>{formatNumber(memory.data.totalThreads)}</strong></span>
+                <span>Total entries: <strong>{formatNumber(memory.data.entries.length)}</strong></span>
+              </div>
+            </>
           ) : null}
         </AsyncPane>
       </Panel>
     </div>
   );
-}
-
-function getSessionMemoryLabel(memory: MemoryResponse) {
-  if (memory.sourceStatus === "unsupported") {
-    return "Unsupported";
-  }
-
-  if (memory.sourceStatus === "empty") {
-    return "No extracted entries";
-  }
-
-  return "Extracted";
-}
-
-function getSessionMemoryMeta(memory: MemoryResponse) {
-  if (memory.sourceStatus === "unsupported") {
-    return "No stage1_outputs";
-  }
-
-  if (memory.sourceStatus === "empty") {
-    return "No session memory row for the current session";
-  }
-
-  return `stage1_outputs ${formatNumber(memory.stage1OutputCount)}`;
 }

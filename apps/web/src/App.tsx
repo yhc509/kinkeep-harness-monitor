@@ -5,9 +5,11 @@ import { AppShell } from "./components/AppShell";
 import { prefetchApiResource } from "./hooks/useApiResource";
 import {
   loadDashboardPage,
-  loadIntegrationsPage,
+  loadHooksPage,
   loadMemoryPage,
+  loadMcpPage,
   loadSessionsPage,
+  loadSkillsPage,
   loadTokensPage,
   prefetchAllRoutes
 } from "./route-prefetch";
@@ -15,7 +17,9 @@ import {
 const DashboardPage = lazy(async () => loadDashboardPage().then((module) => ({ default: module.DashboardPage })));
 const SessionsPage = lazy(async () => loadSessionsPage().then((module) => ({ default: module.SessionsPage })));
 const MemoryPage = lazy(async () => loadMemoryPage().then((module) => ({ default: module.MemoryPage })));
-const IntegrationsPage = lazy(async () => loadIntegrationsPage().then((module) => ({ default: module.IntegrationsPage })));
+const McpPage = lazy(async () => loadMcpPage().then((module) => ({ default: module.McpPage })));
+const HooksPage = lazy(async () => loadHooksPage().then((module) => ({ default: module.HooksPage })));
+const SkillsPage = lazy(async () => loadSkillsPage().then((module) => ({ default: module.SkillsPage })));
 const TokensPage = lazy(async () => loadTokensPage().then((module) => ({ default: module.TokensPage })));
 
 export function App() {
@@ -65,7 +69,10 @@ export function App() {
           <Route path="/sessions/projects/:projectId" element={<SessionsPage />} />
           <Route path="/sessions/projects/:projectId/:sessionId" element={<SessionsPage />} />
           <Route path="/memory" element={<MemoryPage />} />
-          <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/integrations" element={<Navigate to="/mcp" replace />} />
+          <Route path="/mcp" element={<McpPage />} />
+          <Route path="/hooks" element={<HooksPage />} />
+          <Route path="/skills" element={<SkillsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

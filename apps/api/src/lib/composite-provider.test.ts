@@ -79,6 +79,7 @@ describe("CompositeProvider", () => {
         createProject("shared-project", {
           name: "Shared",
           path: "/workspace/shared",
+          providers: ["codex"],
           sessionCount: 1,
           subagentCount: 1,
           updatedAt: "2026-03-14T10:00:00.000Z",
@@ -97,6 +98,7 @@ describe("CompositeProvider", () => {
         createProject("shared-project", {
           name: "Shared",
           path: "/workspace/shared",
+          providers: ["claude-code"],
           sessionCount: 2,
           subagentCount: 0,
           updatedAt: "2026-03-14T12:00:00.000Z",
@@ -105,6 +107,7 @@ describe("CompositeProvider", () => {
         createProject("claude-project", {
           name: "Claude Project",
           path: "/workspace/claude-project",
+          providers: ["claude-code"],
           sessionCount: 1,
           subagentCount: 0,
           updatedAt: "2026-03-13T12:00:00.000Z",
@@ -135,6 +138,7 @@ describe("CompositeProvider", () => {
       id: "shared-project",
       name: "Shared",
       path: "/workspace/shared",
+      providers: ["codex", "claude-code"],
       sessionCount: 3,
       subagentCount: 1,
       updatedAt: "2026-03-14T12:00:00.000Z",
@@ -176,10 +180,18 @@ describe("CompositeProvider", () => {
         entries: [createMemoryEntry("thread-a")],
         modeCounts: [{ mode: "enabled", count: 1 }],
         totalThreads: 1,
-        developerInstructions: "provider-a-instructions"
+        developerInstructions: "provider-a-instructions",
+        providerConfigs: [{
+          provider: "codex",
+          developerInstructions: "provider-a-instructions",
+          personality: null,
+          sourceStatus: "ready",
+          entryCount: 1,
+          totalThreads: 1
+        }]
       }),
       integrations: createIntegrations({
-        mcpServers: [{ name: "docs-a", url: null, usageCount: 1, toolNames: ["search"] }],
+        mcpServers: [{ name: "docs-a", source: "codex", url: null, usageCount: 1, toolNames: ["search"] }],
         skills: [{ id: "skill-a", name: "Skill A", description: "A", source: "codex" }],
         hooks: [{ id: "hook-a", name: "Hook A", preview: "echo a", kind: "shell", source: "codex" }]
       }),
@@ -217,10 +229,18 @@ describe("CompositeProvider", () => {
           { mode: "enabled", count: 1 }
         ],
         totalThreads: 3,
-        developerInstructions: "provider-b-instructions"
+        developerInstructions: "provider-b-instructions",
+        providerConfigs: [{
+          provider: "claude-code",
+          developerInstructions: "provider-b-instructions",
+          personality: null,
+          sourceStatus: "ready",
+          entryCount: 1,
+          totalThreads: 3
+        }]
       }),
       integrations: createIntegrations({
-        mcpServers: [{ name: "docs-b", url: "https://example.com", usageCount: 2, toolNames: ["fetch"] }],
+        mcpServers: [{ name: "docs-b", source: "claude-code", url: "https://example.com", usageCount: 2, toolNames: ["fetch"] }],
         skills: [{ id: "skill-b", name: "Skill B", description: "B", source: "claude-code" }],
         hooks: [{ id: "hook-b", name: "Hook B", preview: "echo b", kind: "shell", source: "claude-code" }]
       }),
@@ -260,6 +280,8 @@ describe("CompositeProvider", () => {
     ]);
     expect(memory.totalThreads).toBe(4);
     expect(memory.developerInstructions).toBe("provider-a-instructions");
+    expect(memory.providerConfigs).toHaveLength(2);
+    expect(memory.providerConfigs.map((config) => config.provider)).toEqual(["codex", "claude-code"]);
 
     expect(integrations.mcpServers.map((server) => server.name)).toEqual(["docs-a", "docs-b"]);
     expect(integrations.skills.map((skill) => skill.id)).toEqual(["skill-a", "skill-b"]);
@@ -371,6 +393,7 @@ function createProject(id: string, overrides: Partial<ProjectSummary> = {}): Pro
     id,
     name: "Project",
     path: "/workspace/project",
+    providers: ["codex"],
     sessionCount: 1,
     subagentCount: 0,
     updatedAt: "2026-03-14T09:00:00.000Z",
@@ -409,6 +432,7 @@ function createOverview(overrides: Partial<OverviewResponse> = {}): OverviewResp
 function createMemory(overrides: Partial<MemoryResponse> = {}): MemoryResponse {
   return {
     entries: [],
+    providerConfigs: [],
     modeCounts: [],
     totalThreads: 0,
     hasStage1OutputsTable: true,
@@ -422,6 +446,7 @@ function createMemory(overrides: Partial<MemoryResponse> = {}): MemoryResponse {
 
 function createMemoryEntry(threadId: string): MemoryResponse["entries"][number] {
   return {
+    provider: "codex",
     threadId,
     title: threadId,
     rawMemory: `memory-${threadId}`,

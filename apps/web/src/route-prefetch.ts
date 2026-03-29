@@ -2,7 +2,9 @@ const routeLoaders = {
   dashboard: () => import("./pages/DashboardPage"),
   sessions: () => import("./pages/SessionsPage"),
   memory: () => import("./pages/MemoryPage"),
-  integrations: () => import("./pages/IntegrationsPage"),
+  mcp: () => import("./pages/McpPage"),
+  hooks: () => import("./pages/HooksPage"),
+  skills: () => import("./pages/SkillsPage"),
   tokens: () => import("./pages/TokensPage")
 };
 
@@ -18,8 +20,16 @@ export function loadMemoryPage() {
   return routeLoaders.memory();
 }
 
-export function loadIntegrationsPage() {
-  return routeLoaders.integrations();
+export function loadMcpPage() {
+  return routeLoaders.mcp();
+}
+
+export function loadHooksPage() {
+  return routeLoaders.hooks();
+}
+
+export function loadSkillsPage() {
+  return routeLoaders.skills();
 }
 
 export function loadTokensPage() {
@@ -39,8 +49,16 @@ export function prefetchRoute(pathname: string) {
     return routeLoaders.memory();
   }
 
-  if (pathname.startsWith("/integrations")) {
-    return routeLoaders.integrations();
+  if (pathname.startsWith("/mcp")) {
+    return routeLoaders.mcp();
+  }
+
+  if (pathname.startsWith("/hooks")) {
+    return routeLoaders.hooks();
+  }
+
+  if (pathname.startsWith("/skills")) {
+    return routeLoaders.skills();
   }
 
   if (pathname.startsWith("/tokens")) {
@@ -54,7 +72,9 @@ export function prefetchAllRoutes() {
   return Promise.allSettled([
     routeLoaders.sessions(),
     routeLoaders.memory(),
-    routeLoaders.integrations(),
+    routeLoaders.mcp(),
+    routeLoaders.hooks(),
+    routeLoaders.skills(),
     routeLoaders.tokens()
   ]);
 }
