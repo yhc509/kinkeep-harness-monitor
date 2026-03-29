@@ -574,7 +574,8 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
     }
 
     const projectDirs = fs.readdirSync(sessionRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory());
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
 
     for (const dir of projectDirs) {
       const claudeMdPath = path.join(sessionRoot, dir.name, "CLAUDE.md");
@@ -668,7 +669,26 @@ function parseClaudeTimeline(filePath: string): TimelineParseResult {
     const timestamp = toLocalDateTime(readClaudeTimestamp(entry)) ?? "";
 
     if (type === "user") {
-      const parts = extractClaudeUserContentParts(isRecord(entry.message) ? entry.message.content : null);
+      const messageContent = isRecord(entry.message) ? entry.message.content : null;
+      const parts = extractClaudeUserContentParts(messageContent);
+      if (parts.length === 0) {
+        const body = extractClaudeMessageText(messageContent);
+        if (!firstUserMessage && body) {
+          firstUserMessage = body;
+        }
+
+        pushTimelineItem({
+          timestamp,
+          kind: "user_message",
+          role: "user",
+          title: createPreview(body || "User message"),
+          body,
+          toolName: null,
+          metadata: {}
+        });
+        continue;
+      }
+
       for (const part of parts) {
         if (part.kind === "tool_result") {
           const toolName = part.toolUseId ? toolNames.get(part.toolUseId) ?? null : null;

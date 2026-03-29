@@ -9,7 +9,7 @@ export interface ClaudeCodeTestFixture {
   primarySessionId: string;
   fallbackSessionId: string;
   mixedContentSessionId: string;
-  emptyContentSessionId: string;
+  unsupportedContentSessionId: string;
   primaryRolloutPath: string;
   config: AppConfig;
   cleanup: () => void;
@@ -27,7 +27,7 @@ export function createClaudeCodeTestFixture(options: { includeAssistantUsage?: b
   const secondarySessionId = "session-beta";
   const fallbackSessionId = "session-fallback";
   const mixedContentSessionId = "session-mixed-content";
-  const emptyContentSessionId = "session-empty-content";
+  const unsupportedContentSessionId = "session-unsupported-content";
   const primaryProjectDir = path.join(claudeHome, "projects", encodeClaudePath(projectRoot));
   const secondaryProjectDir = path.join(claudeHome, "projects", encodeClaudePath(notesRoot));
   const transcriptsDir = path.join(claudeHome, "transcripts");
@@ -204,15 +204,24 @@ Use TypeScript strict mode
     }
   ]);
 
-  writeJsonl(path.join(transcriptsDir, `ses_${emptyContentSessionId}.jsonl`), [
+  writeJsonl(path.join(transcriptsDir, `ses_${unsupportedContentSessionId}.jsonl`), [
     {
       type: "user",
       message: {
         role: "user",
-        content: []
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: "YWJj"
+            }
+          }
+        ]
       },
       timestamp: "2026-03-15T06:00:00.000Z",
-      sessionId: emptyContentSessionId,
+      sessionId: unsupportedContentSessionId,
       cwd: projectApp,
       version: "1.0.0"
     },
@@ -341,7 +350,7 @@ Planning workflow for Claude Code
     primarySessionId,
     fallbackSessionId,
     mixedContentSessionId,
-    emptyContentSessionId,
+    unsupportedContentSessionId,
     primaryRolloutPath,
     config,
     cleanup: () => fs.rmSync(rootDir, { recursive: true, force: true })

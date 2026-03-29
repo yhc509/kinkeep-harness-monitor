@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeCodeDataService } from "./claude-code-service";
 import { createProviderRegistry } from "./provider-registry";
 import { createClaudeCodeTestFixture } from "../test-support/claude-fixture";
@@ -8,6 +8,7 @@ import { createClaudeCodeTestFixture } from "../test-support/claude-fixture";
 const fixtures: Array<ReturnType<typeof createClaudeCodeTestFixture>> = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (fixtures.length > 0) {
     fixtures.pop()?.cleanup();
   }
@@ -187,20 +188,57 @@ describe("ClaudeCodeDataService", () => {
     });
   });
 
-  it("omits user timeline items for empty content arrays", () => {
+  it("creates a fallback user timeline item when user content has no parsable parts", () => {
     const fixture = createClaudeCodeTestFixture();
     fixtures.push(fixture);
     const service = new ClaudeCodeDataService(fixture.config);
 
-    const detail = service.getSessionDetail(fixture.emptyContentSessionId);
+    const detail = service.getSessionDetail(fixture.unsupportedContentSessionId);
     expect(detail?.provider).toBe("claude-code");
     expect(detail?.firstUserMessage).toBe("");
-    expect(detail?.timeline.map((item) => item.kind)).toEqual(["assistant_message"]);
-    expect(detail?.timeline.some((item) => item.kind === "user_message")).toBe(false);
+    expect(detail?.timeline.map((item) => item.kind)).toEqual(["user_message", "assistant_message"]);
     expect(detail?.timeline[0]).toMatchObject({
+      kind: "user_message",
+      title: "User message",
+      body: ""
+    });
+    expect(detail?.timeline[1]).toMatchObject({
       kind: "assistant_message",
       body: "No visible user content to render."
     });
+  });
+
+  it("reads developer instructions from project directories in sorted order", () => {
+    const fixture = createClaudeCodeTestFixture();
+    fixtures.push(fixture);
+    const service = new ClaudeCodeDataService(fixture.config);
+    const sessionRoot = service.getSessionRoot();
+    const projectDirs = fs.readdirSync(sessionRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const projectDir of projectDirs) {
+      fs.writeFileSync(
+        path.join(sessionRoot, projectDir.name, "CLAUDE.md"),
+        `# Instructions for ${projectDir.name}\n`,
+        "utf8"
+      );
+    }
+
+    const originalReaddirSync = fs.readdirSync.bind(fs);
+    vi.spyOn(fs, "readdirSync").mockImplementation(((target, options) => {
+      const result = originalReaddirSync(target, options as never);
+      if (target === sessionRoot && typeof options === "object" && options?.withFileTypes && Array.isArray(result)) {
+        const dirEntries = result as unknown as fs.Dirent[];
+        return [...dirEntries].sort((left, right) => right.name.localeCompare(left.name));
+      }
+
+      return result;
+    }) as typeof fs.readdirSync);
+
+    expect(service.getMemory().developerInstructions).toBe(
+      `# Instructions for ${projectDirs[0]?.name}\n`
+    );
   });
 
   it("parses legacy top-level tool_result entries", () => {
