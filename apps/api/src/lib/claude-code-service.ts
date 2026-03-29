@@ -108,6 +108,17 @@ interface TimelineParseResult {
   firstUserMessage: string;
 }
 
+type ClaudeUserContentPart =
+  | {
+    kind: "text";
+    body: string;
+  }
+  | {
+    kind: "tool_result";
+    body: string;
+    toolUseId: string | null;
+  };
+
 export class ClaudeCodeDataService implements MonitorProviderAdapter {
   readonly id = "claude-code" as const;
   private sessionIndexCache: SessionIndexCacheEntry | null = null;
@@ -657,20 +668,36 @@ function parseClaudeTimeline(filePath: string): TimelineParseResult {
     const timestamp = toLocalDateTime(readClaudeTimestamp(entry)) ?? "";
 
     if (type === "user") {
-      const body = extractClaudeMessageText(isRecord(entry.message) ? entry.message.content : null);
-      if (!firstUserMessage && body) {
-        firstUserMessage = body;
-      }
+      const parts = extractClaudeUserContentParts(isRecord(entry.message) ? entry.message.content : null);
+      for (const part of parts) {
+        if (part.kind === "tool_result") {
+          const toolName = part.toolUseId ? toolNames.get(part.toolUseId) ?? null : null;
+          pushTimelineItem({
+            timestamp,
+            kind: "tool_result",
+            role: "tool",
+            title: toolName ? `Tool result: ${toolName}` : "Tool result",
+            body: part.body,
+            toolName,
+            metadata: part.toolUseId ? { toolUseId: part.toolUseId } : {}
+          });
+          continue;
+        }
 
-      pushTimelineItem({
-        timestamp,
-        kind: "user_message",
-        role: "user",
-        title: createPreview(body || "User message"),
-        body,
-        toolName: null,
-        metadata: {}
-      });
+        if (!firstUserMessage && part.body) {
+          firstUserMessage = part.body;
+        }
+
+        pushTimelineItem({
+          timestamp,
+          kind: "user_message",
+          role: "user",
+          title: createPreview(part.body || "User message"),
+          body: part.body,
+          toolName: null,
+          metadata: {}
+        });
+      }
       continue;
     }
 
@@ -754,21 +781,6 @@ function parseClaudeTimeline(filePath: string): TimelineParseResult {
       continue;
     }
 
-    if (type === "tool_result") {
-      const toolUseId = typeof entry.tool_use_id === "string" ? entry.tool_use_id : null;
-      const toolName = toolUseId ? toolNames.get(toolUseId) ?? null : null;
-      pushTimelineItem({
-        timestamp,
-        kind: "tool_result",
-        role: "tool",
-        title: toolName ? `Tool result: ${toolName}` : "Tool result",
-        body: extractClaudeContentBody(entry.content),
-        toolName,
-        metadata: toolUseId ? { toolUseId } : {}
-      });
-      continue;
-    }
-
     if (type === "system") {
       const body = extractClaudeMessageText(
         isRecord(entry.message) ? entry.message.content : entry.content
@@ -835,12 +847,19 @@ function readClaudeJsonl(filePath: string): Array<Record<string, unknown>> {
 }
 
 function extractFirstUserMessage(entries: Array<Record<string, unknown>>): string {
-  const firstUserEntry = entries.find((entry) => entry.type === "user");
-  if (!firstUserEntry) {
-    return "";
+  for (const entry of entries) {
+    if (entry.type !== "user") {
+      continue;
+    }
+
+    const parts = extractClaudeUserContentParts(isRecord(entry.message) ? entry.message.content : null);
+    const textPart = parts.find((part) => part.kind === "text");
+    if (textPart) {
+      return textPart.body;
+    }
   }
 
-  return extractClaudeMessageText(isRecord(firstUserEntry.message) ? firstUserEntry.message.content : null);
+  return "";
 }
 
 function readClaudeTimestamp(entry: Record<string, unknown> | null): string | number | null {
@@ -872,6 +891,65 @@ function readClaudeEntrypoint(entry: Record<string, unknown> | null): string | n
 
   const entrypoint = entry.entrypoint;
   return typeof entrypoint === "string" && entrypoint.trim() ? entrypoint.trim() : null;
+}
+
+function extractClaudeUserContentParts(content: unknown): ClaudeUserContentPart[] {
+  if (typeof content === "string") {
+    const body = content.trim();
+    return body ? [{ kind: "text", body }] : [];
+  }
+
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const parts: ClaudeUserContentPart[] = [];
+  const textBlocks: string[] = [];
+  const flushTextBlocks = () => {
+    if (textBlocks.length === 0) {
+      return;
+    }
+
+    const body = textBlocks.join("\n\n").trim();
+    textBlocks.length = 0;
+    if (body) {
+      parts.push({ kind: "text", body });
+    }
+  };
+
+  for (const entry of content) {
+    if (typeof entry === "string") {
+      const body = entry.trim();
+      if (body) {
+        textBlocks.push(body);
+      }
+      continue;
+    }
+
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    if (entry.type === "tool_result") {
+      flushTextBlocks();
+      parts.push({
+        kind: "tool_result",
+        body: extractClaudeContentBody(entry.content),
+        toolUseId: typeof entry.tool_use_id === "string" ? entry.tool_use_id : null
+      });
+      continue;
+    }
+
+    if (entry.type === "text") {
+      const body = typeof entry.text === "string" ? entry.text.trim() : "";
+      if (body) {
+        textBlocks.push(body);
+      }
+    }
+  }
+
+  flushTextBlocks();
+  return parts;
 }
 
 function extractClaudeMessageText(content: unknown): string {

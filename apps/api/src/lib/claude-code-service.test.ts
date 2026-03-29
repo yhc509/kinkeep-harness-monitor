@@ -49,7 +49,12 @@ describe("ClaudeCodeDataService", () => {
       "event"
     ]);
     expect(detail?.timeline.find((item) => item.kind === "tool_call")?.toolName).toBe("Bash");
-    expect(detail?.timeline.find((item) => item.kind === "tool_result")?.title).toBe("Tool result: Bash");
+    expect(detail?.timeline.filter((item) => item.kind === "user_message")).toHaveLength(1);
+    expect(detail?.timeline.find((item) => item.kind === "tool_result")).toMatchObject({
+      title: "Tool result: Bash",
+      body: "1 failed assertion",
+      metadata: { toolUseId: "toolu_1" }
+    });
     expect(detail?.rolloutPath).toBe(fixture.primaryRolloutPath);
 
     const fallbackDetail = service.getSessionDetail(fixture.fallbackSessionId);
@@ -150,5 +155,50 @@ describe("ClaudeCodeDataService", () => {
     const registry = createProviderRegistry(fixture.config);
     expect(registry.getProviders()).toHaveLength(1);
     expect(registry.getProviders()[0]?.id).toBe("claude-code");
+  });
+
+  it("splits mixed user content into user and tool timeline items", () => {
+    const fixture = createClaudeCodeTestFixture();
+    fixtures.push(fixture);
+    const service = new ClaudeCodeDataService(fixture.config);
+
+    const detail = service.getSessionDetail(fixture.mixedContentSessionId);
+    expect(detail?.provider).toBe("claude-code");
+    expect(detail?.firstUserMessage).toBe("Review the failing tool output");
+    expect(detail?.timeline.map((item) => item.kind)).toEqual([
+      "user_message",
+      "tool_result",
+      "user_message"
+    ]);
+    expect(detail?.timeline[0]).toMatchObject({
+      kind: "user_message",
+      body: "Review the failing tool output"
+    });
+    expect(detail?.timeline[1]).toMatchObject({
+      kind: "tool_result",
+      title: "Tool result",
+      body: "1 failed assertion",
+      metadata: { toolUseId: "toolu_mixed" }
+    });
+    expect(detail?.timeline[2]).toMatchObject({
+      kind: "user_message",
+      body: "Summarize the next debugging step"
+    });
+  });
+
+  it("omits user timeline items for empty content arrays", () => {
+    const fixture = createClaudeCodeTestFixture();
+    fixtures.push(fixture);
+    const service = new ClaudeCodeDataService(fixture.config);
+
+    const detail = service.getSessionDetail(fixture.emptyContentSessionId);
+    expect(detail?.provider).toBe("claude-code");
+    expect(detail?.firstUserMessage).toBe("");
+    expect(detail?.timeline.map((item) => item.kind)).toEqual(["assistant_message"]);
+    expect(detail?.timeline.some((item) => item.kind === "user_message")).toBe(false);
+    expect(detail?.timeline[0]).toMatchObject({
+      kind: "assistant_message",
+      body: "No visible user content to render."
+    });
   });
 });
