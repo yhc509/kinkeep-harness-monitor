@@ -781,6 +781,21 @@ function parseClaudeTimeline(filePath: string): TimelineParseResult {
       continue;
     }
 
+    if (type === "tool_result") {
+      const toolUseId = typeof entry.tool_use_id === "string" ? entry.tool_use_id : null;
+      const toolName = toolUseId ? toolNames.get(toolUseId) ?? null : null;
+      pushTimelineItem({
+        timestamp,
+        kind: "tool_result",
+        role: "tool",
+        title: toolName ? `Tool result: ${toolName}` : "Tool result",
+        body: extractClaudeContentBody(entry.content),
+        toolName,
+        metadata: toolUseId ? { toolUseId } : {}
+      });
+      continue;
+    }
+
     if (type === "system") {
       const body = extractClaudeMessageText(
         isRecord(entry.message) ? entry.message.content : entry.content
@@ -1201,7 +1216,9 @@ function scanClaudeSkills(baseDir: string): SkillRecord[] {
 
   for (const entry of entries) {
     const fullPath = path.join(baseDir, entry.name);
-    if (entry.isDirectory()) {
+    const entryType = getClaudeSkillEntryType(entry, fullPath);
+
+    if (entryType === "directory") {
       const markdownFile = findClaudeSkillMarkdown(fullPath);
       if (!markdownFile) {
         continue;
@@ -1218,7 +1235,7 @@ function scanClaudeSkills(baseDir: string): SkillRecord[] {
       continue;
     }
 
-    if (entry.isFile() && entry.name.endsWith(".md")) {
+    if (entryType === "file" && entry.name.endsWith(".md")) {
       const parsed = parseClaudeSkillFile(fullPath, path.basename(entry.name, ".md"));
       records.push({
         id: createSkillId(fullPath),
@@ -1233,9 +1250,41 @@ function scanClaudeSkills(baseDir: string): SkillRecord[] {
   return records;
 }
 
+function getClaudeSkillEntryType(entry: fs.Dirent<string>, fullPath: string): "directory" | "file" | null {
+  if (entry.isDirectory()) {
+    return "directory";
+  }
+
+  if (entry.isFile()) {
+    return "file";
+  }
+
+  if (!entry.isSymbolicLink()) {
+    return null;
+  }
+
+  try {
+    const stats = fs.statSync(fullPath);
+    if (stats.isDirectory()) {
+      return "directory";
+    }
+
+    if (stats.isFile()) {
+      return "file";
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 function findClaudeSkillMarkdown(skillDir: string): string | null {
   const files = fs.readdirSync(skillDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .filter((entry) => (
+      getClaudeSkillEntryType(entry, path.join(skillDir, entry.name)) === "file"
+      && entry.name.endsWith(".md")
+    ))
     .sort((left, right) => {
       if (left.name === "SKILL.md") {
         return -1;
