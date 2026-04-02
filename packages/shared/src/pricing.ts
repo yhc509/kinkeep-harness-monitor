@@ -16,19 +16,55 @@ export interface UsageCostInput {
 export const DEFAULT_MODEL_PRICING_KEY = "claude-sonnet-4-6";
 
 export const MODEL_PRICING_TABLE: Record<string, ModelPricing> = {
+  "claude-opus-4-6": {
+    inputPerMillionTokens: 5,
+    outputPerMillionTokens: 25,
+    cacheReadPerMillionTokens: 0.5,
+    cacheCreationPerMillionTokens: 6.25
+  },
+  "claude-opus-4-5": {
+    inputPerMillionTokens: 5,
+    outputPerMillionTokens: 25,
+    cacheReadPerMillionTokens: 0.5,
+    cacheCreationPerMillionTokens: 6.25
+  },
   "claude-sonnet-4-6": {
     inputPerMillionTokens: 3,
     outputPerMillionTokens: 15,
     cacheReadPerMillionTokens: 0.3,
     cacheCreationPerMillionTokens: 3.75
   },
-  "claude-opus-4-6": {
-    inputPerMillionTokens: 15,
-    outputPerMillionTokens: 75,
-    cacheReadPerMillionTokens: 1.5,
-    cacheCreationPerMillionTokens: 18.75
+  "claude-sonnet-4-5": {
+    inputPerMillionTokens: 3,
+    outputPerMillionTokens: 15,
+    cacheReadPerMillionTokens: 0.3,
+    cacheCreationPerMillionTokens: 3.75
   },
   "claude-haiku-4-5": {
+    inputPerMillionTokens: 1,
+    outputPerMillionTokens: 5,
+    cacheReadPerMillionTokens: 0.1,
+    cacheCreationPerMillionTokens: 1.25
+  },
+  "claude-3.5-sonnet": {
+    inputPerMillionTokens: 3,
+    outputPerMillionTokens: 15,
+    cacheReadPerMillionTokens: 0.3,
+    cacheCreationPerMillionTokens: 3.75
+  },
+  "claude-3-5-sonnet": {
+    inputPerMillionTokens: 3,
+    outputPerMillionTokens: 15,
+    cacheReadPerMillionTokens: 0.3,
+    cacheCreationPerMillionTokens: 3.75
+  },
+  "claude-3.5-haiku": {
+    inputPerMillionTokens: 0.8,
+    outputPerMillionTokens: 4,
+    cacheReadPerMillionTokens: 0.08,
+    cacheCreationPerMillionTokens: 1
+  },
+  "claude-3-5-haiku": {
     inputPerMillionTokens: 0.8,
     outputPerMillionTokens: 4,
     cacheReadPerMillionTokens: 0.08,
@@ -40,17 +76,53 @@ export const MODEL_PRICING_TABLE: Record<string, ModelPricing> = {
     cacheReadPerMillionTokens: 0.275,
     cacheCreationPerMillionTokens: 1.1
   },
+  "o3-mini": {
+    inputPerMillionTokens: 1.1,
+    outputPerMillionTokens: 4.4,
+    cacheReadPerMillionTokens: 0.55,
+    cacheCreationPerMillionTokens: 1.1
+  },
   o3: {
     inputPerMillionTokens: 2,
     outputPerMillionTokens: 8,
     cacheReadPerMillionTokens: 0.5,
     cacheCreationPerMillionTokens: 2
   },
+  "gpt-5.4": {
+    inputPerMillionTokens: 2.5,
+    outputPerMillionTokens: 15,
+    cacheReadPerMillionTokens: 0.25,
+    cacheCreationPerMillionTokens: 2.5
+  },
+  "gpt-5.4-mini": {
+    inputPerMillionTokens: 0.75,
+    outputPerMillionTokens: 4.5,
+    cacheReadPerMillionTokens: 0.075,
+    cacheCreationPerMillionTokens: 0.75
+  },
+  "gpt-5.4-nano": {
+    inputPerMillionTokens: 0.2,
+    outputPerMillionTokens: 1.25,
+    cacheReadPerMillionTokens: 0.02,
+    cacheCreationPerMillionTokens: 0.2
+  },
   "codex-mini": {
     inputPerMillionTokens: 1.5,
     outputPerMillionTokens: 6,
     cacheReadPerMillionTokens: 0.375,
     cacheCreationPerMillionTokens: 1.5
+  },
+  "gpt-4o": {
+    inputPerMillionTokens: 2.5,
+    outputPerMillionTokens: 10,
+    cacheReadPerMillionTokens: 1.25,
+    cacheCreationPerMillionTokens: 2.5
+  },
+  "gpt-4o-mini": {
+    inputPerMillionTokens: 0.15,
+    outputPerMillionTokens: 0.6,
+    cacheReadPerMillionTokens: 0.075,
+    cacheCreationPerMillionTokens: 0.15
   },
   "gpt-4.1": {
     inputPerMillionTokens: 2,
@@ -117,7 +189,7 @@ export function calculateCacheHitRate(usage: UsageCostInput): number {
     : 0;
 }
 
-function normalizeUsageCostInput(usage: UsageCostInput) {
+export function normalizeUsageCostInput(usage: UsageCostInput) {
   const cachedInputTokens = normalizeTokenCount(usage.cachedInputTokens);
   const inputTokens = usage.inputTokens == null
     ? null

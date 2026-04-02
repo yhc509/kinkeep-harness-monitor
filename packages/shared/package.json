@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "vitest run src/pricing.test.ts"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

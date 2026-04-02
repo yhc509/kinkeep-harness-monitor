@@ -53,8 +53,8 @@ describe("API server", () => {
       cachedInputTokens: 20,
       uncachedTokens: 120
     });
-    expect(overview.json().todayCost).toBeCloseTo(0.000846, 8);
-    expect(overview.json().cacheSavings.savedCost).toBeCloseTo(0.000054, 8);
+    expect(overview.json().todayCost).toBeCloseTo(0.000805, 8);
+    expect(overview.json().cacheSavings.savedCost).toBeCloseTo(0.000045, 8);
 
     const session = await app.inject({
       method: "GET",
@@ -165,7 +165,7 @@ describe("API server", () => {
       cachedInputTokens: 20,
       uncachedTokens: 120
     });
-    expect(overview.json().todayCost).toBeCloseTo(0.000846, 8);
+    expect(overview.json().todayCost).toBeCloseTo(0.000805, 8);
 
     await app.close();
   });
