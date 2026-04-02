@@ -30,7 +30,7 @@ import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
 
-const CACHE_PARSE_VERSION = "8";
+const CACHE_PARSE_VERSION = "9";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
 const PROJECT_USAGE_LIMIT = 12;
@@ -42,7 +42,7 @@ const UNKNOWN_MODEL_NAME = "Unknown Model";
 const CLAUDE_CODE_STATS_ROLLOUT_PATH = "__claude-code-stats__";
 const CLAUDE_CODE_STATS_PROJECT_ID = "__claude-code__";
 const CLAUDE_CODE_STATS_PROJECT_NAME = "Claude Code";
-const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v3";
+const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v4";
 const CLAUDE_CODE_STATS_MODEL_PROVIDER = "anthropic";
 const SYNTHETIC_ROLLOUT_PATHS = new Set([CLAUDE_CODE_STATS_ROLLOUT_PATH]);
 
@@ -205,6 +205,14 @@ interface StatsCacheDailyUsage {
   }>;
 }
 
+interface StatsCacheModelTotals {
+  uncachedInputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  totalTokens: number;
+}
+
 export class TokenCollectorService {
   private usageRefreshPromise: Promise<SnapshotResult> | null = null;
 
@@ -310,7 +318,8 @@ export class TokenCollectorService {
     }
 
     const parsed = JSON.parse(text) as unknown;
-    const dailyUsage = parseStatsCacheDailyUsage(parsed);
+    const record = isRecord(parsed) ? parsed : {};
+    const dailyUsage = parseStatsCacheDailyUsage(parsed, record.modelUsage);
     const database = this.openMonitorDb();
 
     try {
@@ -1688,9 +1697,20 @@ function createModelUsageKey(hourBucket: string, modelName: string | null, model
   return `${hourBucket}\u0000${modelName?.trim() || UNKNOWN_MODEL_NAME}\u0000${normalizeProvider(modelProvider) ?? ""}`;
 }
 
-function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
+/**
+ * Parses stats-cache daily totals and distributes each day's per-model total across input/output/cache buckets
+ * using that model's cumulative `modelUsage` ratio.
+ *
+ * Limitation: the cumulative ratio is only an estimation of a single day's actual mix. The gap can be larger
+ * around cache cold starts or when usage patterns change over time.
+ *
+ * Models without `modelUsage` preserve the existing fallback behavior and treat the full total as
+ * `uncachedInputTokens`.
+ */
+function parseStatsCacheDailyUsage(value: unknown, modelUsageValue: unknown): StatsCacheDailyUsage[] {
   const record = isRecord(value) ? value : {};
   const dailyModelTokens = Array.isArray(record.dailyModelTokens) ? record.dailyModelTokens : [];
+  const modelUsageTotals = parseStatsCacheModelTotals(modelUsageValue);
   const dailyUsage: StatsCacheDailyUsage[] = [];
 
   for (const entry of dailyModelTokens) {
@@ -1715,11 +1735,7 @@ function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
         return [{
           modelName: normalizedName,
           totalTokens: normalizedTotal,
-          inputTokens: normalizedTotal,
-          cachedInputTokens: 0,
-          cacheCreationInputTokens: 0,
-          uncachedInputTokens: normalizedTotal,
-          outputTokens: 0
+          ...resolveStatsCacheTokenBreakdown(normalizedTotal, modelUsageTotals.get(normalizedName))
         }];
       })
       .sort((left, right) => left.modelName.localeCompare(right.modelName));
@@ -1727,13 +1743,11 @@ function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
     dailyUsage.push({
       hourBucket,
       totalTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
-      // stats-cache exposes per-day totals, but not reliable daily cache-hit/output splits.
-      // Keep synthetic rows non-zero by treating the daily total as estimated uncached input.
-      inputTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
-      cachedInputTokens: 0,
-      cacheCreationInputTokens: 0,
-      uncachedInputTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
-      outputTokens: 0,
+      inputTokens: modelUsage.reduce((sum, item) => sum + item.inputTokens, 0),
+      cachedInputTokens: modelUsage.reduce((sum, item) => sum + item.cachedInputTokens, 0),
+      cacheCreationInputTokens: modelUsage.reduce((sum, item) => sum + item.cacheCreationInputTokens, 0),
+      uncachedInputTokens: modelUsage.reduce((sum, item) => sum + item.uncachedInputTokens + item.cacheCreationInputTokens, 0),
+      outputTokens: modelUsage.reduce((sum, item) => sum + item.outputTokens, 0),
       modelUsage
     });
   }
@@ -1758,6 +1772,131 @@ function parseStatsCacheHourBucket(value: unknown): string | null {
   }
 
   return formatHourBucket(date);
+}
+
+function parseStatsCacheModelTotals(value: unknown): Map<string, StatsCacheModelTotals> {
+  const record = isRecord(value) ? value : {};
+  const totals = new Map<string, StatsCacheModelTotals>();
+
+  for (const [modelName, rawTotals] of Object.entries(record)) {
+    const normalizedName = modelName.trim();
+    if (!normalizedName || !isRecord(rawTotals)) {
+      continue;
+    }
+
+    const uncachedInputTokens = normalizeStatsTokenCount(rawTotals.inputTokens) ?? 0;
+    const outputTokens = normalizeStatsTokenCount(rawTotals.outputTokens) ?? 0;
+    const cachedInputTokens = normalizeStatsTokenCount(rawTotals.cacheReadInputTokens) ?? 0;
+    const cacheCreationInputTokens = normalizeStatsTokenCount(rawTotals.cacheCreationInputTokens) ?? 0;
+    const totalTokens = uncachedInputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens;
+
+    if (totalTokens <= 0) {
+      continue;
+    }
+
+    totals.set(normalizedName, {
+      uncachedInputTokens,
+      outputTokens,
+      cachedInputTokens,
+      cacheCreationInputTokens,
+      totalTokens
+    });
+  }
+
+  return totals;
+}
+
+/**
+ * Allocates a daily model total by cumulative `modelUsage` ratio, then rebalances rounded values so the
+ * bucket sum still matches `totalTokens`.
+ */
+function resolveStatsCacheTokenBreakdown(
+  totalTokens: number,
+  modelTotals: StatsCacheModelTotals | undefined
+): Omit<StatsCacheDailyUsage["modelUsage"][number], "modelName" | "totalTokens"> {
+  if (!modelTotals || modelTotals.totalTokens <= 0) {
+    return {
+      inputTokens: totalTokens,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      uncachedInputTokens: totalTokens,
+      outputTokens: 0
+    };
+  }
+
+  const allocations = [
+    {
+      key: "uncachedInputTokens" as const,
+      sourceTokens: modelTotals.uncachedInputTokens,
+      allocatedTokens: Math.round((totalTokens * modelTotals.uncachedInputTokens) / modelTotals.totalTokens)
+    },
+    {
+      key: "outputTokens" as const,
+      sourceTokens: modelTotals.outputTokens,
+      allocatedTokens: Math.round((totalTokens * modelTotals.outputTokens) / modelTotals.totalTokens)
+    },
+    {
+      key: "cachedInputTokens" as const,
+      sourceTokens: modelTotals.cachedInputTokens,
+      allocatedTokens: Math.round((totalTokens * modelTotals.cachedInputTokens) / modelTotals.totalTokens)
+    },
+    {
+      key: "cacheCreationInputTokens" as const,
+      sourceTokens: modelTotals.cacheCreationInputTokens,
+      allocatedTokens: Math.round((totalTokens * modelTotals.cacheCreationInputTokens) / modelTotals.totalTokens)
+    }
+  ];
+  rebalanceStatsCacheAllocations(allocations, totalTokens);
+
+  const uncachedInputTokens = allocations.find((entry) => entry.key === "uncachedInputTokens")?.allocatedTokens ?? 0;
+  const outputTokens = allocations.find((entry) => entry.key === "outputTokens")?.allocatedTokens ?? 0;
+  const cachedInputTokens = allocations.find((entry) => entry.key === "cachedInputTokens")?.allocatedTokens ?? 0;
+  const cacheCreationInputTokens = allocations.find((entry) => entry.key === "cacheCreationInputTokens")?.allocatedTokens ?? 0;
+
+  return {
+    inputTokens: uncachedInputTokens + cachedInputTokens + cacheCreationInputTokens,
+    cachedInputTokens,
+    cacheCreationInputTokens,
+    uncachedInputTokens,
+    outputTokens
+  };
+}
+
+function rebalanceStatsCacheAllocations(
+  allocations: Array<{
+    key: "uncachedInputTokens" | "outputTokens" | "cachedInputTokens" | "cacheCreationInputTokens";
+    sourceTokens: number;
+    allocatedTokens: number;
+  }>,
+  totalTokens: number
+): void {
+  let delta = totalTokens - allocations.reduce((sum, entry) => sum + entry.allocatedTokens, 0);
+  if (delta === 0) {
+    return;
+  }
+
+  const rankedAllocations = [...allocations]
+    .sort((left, right) => (
+      right.allocatedTokens - left.allocatedTokens
+      || right.sourceTokens - left.sourceTokens
+      || left.key.localeCompare(right.key)
+    ));
+
+  if (delta > 0) {
+    rankedAllocations[0]!.allocatedTokens += delta;
+    return;
+  }
+
+  delta = Math.abs(delta);
+  for (const entry of rankedAllocations) {
+    if (delta === 0) {
+      break;
+    }
+
+    const reduction = Math.min(entry.allocatedTokens, delta);
+    entry.allocatedTokens -= reduction;
+    delta -= reduction;
+  }
 }
 
 function normalizeStatsTokenCount(value: unknown): number | null {

@@ -789,31 +789,122 @@ describe("TokenCollectorService", () => {
     collector.importStatsCacheUsage(statsCachePath);
     collector.captureSnapshot(new Date("2026-01-07T23:30:00+09:00"));
 
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    const aggregateRow = database.prepare(`
+      SELECT
+        total_tokens,
+        input_tokens,
+        cached_input_tokens,
+        cache_creation_input_tokens,
+        uncached_input_tokens,
+        output_tokens
+      FROM rollout_hourly_usage
+      WHERE rollout_path = '__claude-code-stats__'
+        AND hour_bucket = '2026-01-07T00:00:00'
+    `).get() as {
+      total_tokens: number;
+      input_tokens: number;
+      cached_input_tokens: number;
+      cache_creation_input_tokens: number;
+      uncached_input_tokens: number;
+      output_tokens: number;
+    } | undefined;
+    const sonnetRow = database.prepare(`
+      SELECT
+        total_tokens,
+        input_tokens,
+        cached_input_tokens,
+        cache_creation_input_tokens,
+        uncached_input_tokens,
+        output_tokens
+      FROM rollout_hourly_model_usage
+      WHERE rollout_path = '__claude-code-stats__'
+        AND hour_bucket = '2026-01-07T00:00:00'
+        AND model_name = 'claude-sonnet-4-5-20250929'
+    `).get() as {
+      total_tokens: number;
+      input_tokens: number;
+      cached_input_tokens: number;
+      cache_creation_input_tokens: number;
+      uncached_input_tokens: number;
+      output_tokens: number;
+    } | undefined;
+    const opusRow = database.prepare(`
+      SELECT
+        total_tokens,
+        input_tokens,
+        cached_input_tokens,
+        cache_creation_input_tokens,
+        uncached_input_tokens,
+        output_tokens
+      FROM rollout_hourly_model_usage
+      WHERE rollout_path = '__claude-code-stats__'
+        AND hour_bucket = '2026-01-07T00:00:00'
+        AND model_name = 'claude-opus-4-5-20250514'
+    `).get() as {
+      total_tokens: number;
+      input_tokens: number;
+      cached_input_tokens: number;
+      cache_creation_input_tokens: number;
+      uncached_input_tokens: number;
+      output_tokens: number;
+    } | undefined;
+    database.close();
+
+    expect(aggregateRow).toEqual({
+      total_tokens: 152_079,
+      input_tokens: 152_071,
+      cached_input_tokens: 1_932,
+      cache_creation_input_tokens: 138,
+      uncached_input_tokens: 150_139,
+      output_tokens: 8
+    });
+    expect(aggregateRow!.input_tokens + aggregateRow!.output_tokens).toBe(aggregateRow!.total_tokens);
+    expect(sonnetRow).toEqual({
+      total_tokens: 2_079,
+      input_tokens: 2_071,
+      cached_input_tokens: 1_932,
+      cache_creation_input_tokens: 138,
+      uncached_input_tokens: 1,
+      output_tokens: 8
+    });
+    expect(sonnetRow!.input_tokens + sonnetRow!.output_tokens).toBe(sonnetRow!.total_tokens);
+    expect(opusRow).toEqual({
+      total_tokens: 150_000,
+      input_tokens: 150_000,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      uncached_input_tokens: 150_000,
+      output_tokens: 0
+    });
+
     const tokens = collector.getTokens(1, new Date("2026-01-07T23:30:00+09:00"));
     expect(tokens.daily[0]).toMatchObject({
       day: "2026-01-07",
       totalTokens: 152_079,
-      inputTokens: 152_079,
-      cachedInputTokens: 0,
-      uncachedInputTokens: 152_079,
-      outputTokens: 0
+      inputTokens: 152_071,
+      cachedInputTokens: 1_932,
+      uncachedInputTokens: 150_139,
+      outputTokens: 8
     });
+    expect(tokens.daily[0]!.inputTokens + tokens.daily[0]!.outputTokens).toBe(tokens.daily[0]!.totalTokens);
     expect(tokens.dailyProviderTokens[0]).toEqual({
       day: "2026-01-07",
       codexTokens: 0,
       claudeCodeTokens: 152_079
     });
-    expect(tokens.hourly).toContainEqual({
+    const statsHour = tokens.hourly.find((entry) => entry.hourBucket === "2026-01-07T00:00:00");
+    expect(statsHour).toMatchObject({
       hourBucket: "2026-01-07T00:00:00",
       totalTokens: 152_079,
-      inputTokens: 152_079,
-      cachedInputTokens: 0,
-      uncachedInputTokens: 152_079,
-      outputTokens: 0,
+      inputTokens: 152_071,
+      cachedInputTokens: 1_932,
+      uncachedInputTokens: 150_139,
+      outputTokens: 8,
       reasoningOutputTokens: 0,
-      requestCount: 0,
-      estimatedCost: 0.756237
+      requestCount: 0
     });
+    expect(statsHour?.estimatedCost).toBeCloseTo(0.7512201, 8);
     expect(tokens.modelUsage).toEqual([
       {
         modelName: "claude-opus-4-5-20250514",
@@ -834,6 +925,73 @@ describe("TokenCollectorService", () => {
       projectPath: "",
       totalTokens: 152_079,
       requestCount: 0
+    });
+  });
+
+  it("treats stats-cache totals as input-only when modelUsage is missing", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    const statsCachePath = path.join(fixture.claudeHome, "stats-cache.json");
+
+    writeStatsCache(statsCachePath, {
+      version: 2,
+      lastComputedDate: "2026-01-07",
+      dailyModelTokens: [
+        {
+          date: "2026-01-07",
+          tokensByModel: {
+            "claude-opus-4-5-20250514": 70
+          }
+        }
+      ]
+    });
+
+    collector.importStatsCacheUsage(statsCachePath);
+    collector.captureSnapshot(new Date("2026-01-07T23:30:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-01-07T23:30:00+09:00"));
+    expect(tokens.daily[0]).toMatchObject({
+      day: "2026-01-07",
+      totalTokens: 70,
+      inputTokens: 70,
+      cachedInputTokens: 0,
+      uncachedInputTokens: 70,
+      outputTokens: 0
+    });
+
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    const row = database.prepare(`
+      SELECT
+        total_tokens,
+        input_tokens,
+        cached_input_tokens,
+        cache_creation_input_tokens,
+        uncached_input_tokens,
+        output_tokens
+      FROM rollout_hourly_model_usage
+      WHERE rollout_path = '__claude-code-stats__'
+        AND hour_bucket = '2026-01-07T00:00:00'
+        AND model_name = 'claude-opus-4-5-20250514'
+    `).get() as {
+      total_tokens: number;
+      input_tokens: number;
+      cached_input_tokens: number;
+      cache_creation_input_tokens: number;
+      uncached_input_tokens: number;
+      output_tokens: number;
+    } | undefined;
+    database.close();
+
+    expect(row).toEqual({
+      total_tokens: 70,
+      input_tokens: 70,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      uncached_input_tokens: 70,
+      output_tokens: 0
     });
   });
 
@@ -980,7 +1138,13 @@ describe("TokenCollectorService", () => {
     collector.captureSnapshot(new Date("2026-01-07T23:30:00+09:00"));
 
     const tokens = collector.getTokens(1, new Date("2026-01-07T23:30:00+09:00"));
-    expect(tokens.daily[0]?.totalTokens).toBe(70);
+    expect(tokens.daily[0]).toMatchObject({
+      totalTokens: 70,
+      inputTokens: 70,
+      cachedInputTokens: 0,
+      uncachedInputTokens: 70,
+      outputTokens: 0
+    });
     expect(tokens.daily[0]?.uncachedInputTokens).toBe(70);
     expect(tokens.modelUsage).toEqual([
       {
