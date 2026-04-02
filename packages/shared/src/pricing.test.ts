@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import pricingData from "./model-pricing.json";
 import {
   DEFAULT_MODEL_PRICING_KEY,
   MODEL_PRICING_TABLE,
@@ -6,6 +7,37 @@ import {
   normalizeUsageCostInput,
   resolveModelPricing
 } from "./pricing";
+
+const REQUIRED_PRICING_FIELDS = [
+  "inputPerMillionTokens",
+  "outputPerMillionTokens",
+  "cacheReadPerMillionTokens",
+  "cacheCreationPerMillionTokens"
+] satisfies Array<keyof (typeof pricingData)[keyof typeof pricingData]>;
+
+describe("model-pricing.json", () => {
+  it("contains at least one model entry", () => {
+    expect(Object.keys(MODEL_PRICING_TABLE)).not.toHaveLength(0);
+  });
+
+  it("includes the default pricing key in the pricing table", () => {
+    expect(MODEL_PRICING_TABLE).toHaveProperty(DEFAULT_MODEL_PRICING_KEY);
+  });
+
+  it("includes all required pricing fields for every model", () => {
+    for (const entry of Object.values(pricingData)) {
+      expect(Object.keys(entry).sort()).toEqual([...REQUIRED_PRICING_FIELDS].sort());
+    }
+  });
+
+  it("stores positive pricing values for every field", () => {
+    for (const entry of Object.values(pricingData)) {
+      for (const value of Object.values(entry)) {
+        expect(value).toBeGreaterThan(0);
+      }
+    }
+  });
+});
 
 describe("resolveModelPricing", () => {
   it("returns the exact pricing entry when the key matches", () => {
