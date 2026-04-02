@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run src/pricing.test.ts"
   },
   "exports": {

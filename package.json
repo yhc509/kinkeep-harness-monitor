@@ -4,9 +4,9 @@
   "packageManager": "pnpm@10.26.2",
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,yellow \"pnpm --filter @codex-monitor/api dev\" \"pnpm --filter @codex-monitor/web dev\"",
-    "build": "pnpm --filter @codex-monitor/api build && pnpm --filter @codex-monitor/web build",
+    "build": "pnpm --filter @codex-monitor/shared build && pnpm --filter @codex-monitor/api build && pnpm --filter @codex-monitor/web build",
     "test": "pnpm --filter @codex-monitor/shared test && pnpm --filter @codex-monitor/api test",
-    "typecheck": "pnpm --filter @codex-monitor/api typecheck && pnpm --filter @codex-monitor/web typecheck",
+    "typecheck": "pnpm --filter @codex-monitor/shared typecheck && pnpm --filter @codex-monitor/api typecheck && pnpm --filter @codex-monitor/web typecheck",
     "start": "pnpm --filter @codex-monitor/api start",
     "server:install-launchd": "pnpm --filter @codex-monitor/api install-server-launchd",
     "collector:snapshot": "pnpm --filter @codex-monitor/api snapshot",
