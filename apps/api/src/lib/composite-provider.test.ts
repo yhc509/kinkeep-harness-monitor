@@ -16,18 +16,43 @@ import type { ResolvedProjectInfo } from "./project-resolver";
 
 const OVERVIEW_TOKENS: OverviewTokenSnapshot = {
   todayTokens: {
-    totalTokens: 0,
-    cachedInputTokens: 0,
-    uncachedTokens: 0
+    totalTokens: 77,
+    cachedInputTokens: 17,
+    uncachedTokens: 60
   },
-  daily: [],
-  heatmapDaily: [],
+  todayCost: 0.0042,
+  cacheSavings: {
+    actualCost: 0.0042,
+    projectedCostWithoutCache: 0.0051,
+    savedCost: 0.0009,
+    hitRate: 17 / 55
+  },
+  daily: [{
+    day: "2026-03-14",
+    totalTokens: 77,
+    inputTokens: 55,
+    cachedInputTokens: 17,
+    uncachedTokens: 60,
+    uncachedInputTokens: 38,
+    outputTokens: 22,
+    estimatedCost: 0.0042
+  }],
+  heatmapDaily: [{
+    day: "2026-03-13",
+    totalTokens: 12,
+    inputTokens: 9,
+    cachedInputTokens: 3,
+    uncachedTokens: 9,
+    uncachedInputTokens: 6,
+    outputTokens: 3,
+    estimatedCost: 0.0007
+  }],
   averageTokens7d: {
-    totalTokens: 0,
-    cachedInputTokens: 0,
-    uncachedTokens: 0
+    totalTokens: 11,
+    cachedInputTokens: 4,
+    uncachedTokens: 7
   },
-  lastSyncedAt: null
+  lastSyncedAt: "2026-03-14T10:00:00.000Z"
 };
 
 describe("CompositeProvider", () => {
@@ -266,12 +291,14 @@ describe("CompositeProvider", () => {
       totalSkills: 4,
       totalMcpServers: 5,
       totalHooks: 3,
-      todayTokens: {
-        totalTokens: 140,
-        cachedInputTokens: 35,
-        uncachedTokens: 105
-      }
+      todayTokens: OVERVIEW_TOKENS.todayTokens
     });
+    expect(overview.daily).toEqual(OVERVIEW_TOKENS.daily);
+    expect(overview.heatmapDaily).toEqual(OVERVIEW_TOKENS.heatmapDaily);
+    expect(overview.averageTokens7d).toEqual(OVERVIEW_TOKENS.averageTokens7d);
+    expect(overview.todayCost).toBe(OVERVIEW_TOKENS.todayCost);
+    expect(overview.cacheSavings).toEqual(OVERVIEW_TOKENS.cacheSavings);
+    expect(overview.lastSyncedAt).toBe(OVERVIEW_TOKENS.lastSyncedAt);
 
     expect(memory.entries.map((entry) => entry.threadId)).toEqual(["thread-a", "thread-b"]);
     expect(memory.modeCounts).toEqual([
@@ -323,6 +350,7 @@ function createProvider(options: {
   const ensureMonitorSchema = vi.fn();
   const ensureFreshIntegrationsUsage = vi.fn(async () => undefined);
   const refreshIntegrationsUsageInBackground = vi.fn(async () => undefined);
+  const baseOverview = options.overview ?? createOverview();
 
   return {
     ensureMonitorSchema,
@@ -333,7 +361,19 @@ function createProvider(options: {
       ensureMonitorSchema,
       ensureFreshIntegrationsUsage,
       refreshIntegrationsUsageInBackground,
-      getOverview: () => options.overview ?? createOverview(),
+      getOverview: (tokens) => ({
+        ...baseOverview,
+        stats: {
+          ...baseOverview.stats,
+          todayTokens: tokens.todayTokens
+        },
+        todayCost: tokens.todayCost,
+        cacheSavings: tokens.cacheSavings,
+        daily: tokens.daily,
+        heatmapDaily: tokens.heatmapDaily,
+        averageTokens7d: tokens.averageTokens7d,
+        lastSyncedAt: tokens.lastSyncedAt
+      }),
       listSessions: () => options.sessions ?? [],
       listProjects: () => options.projects ?? [],
       getSessionDetail: (id) => options.sessionDetails?.[id] ?? null,
@@ -415,6 +455,13 @@ function createOverview(overrides: Partial<OverviewResponse> = {}): OverviewResp
         cachedInputTokens: 0,
         uncachedTokens: 0
       }
+    },
+    todayCost: 0,
+    cacheSavings: {
+      actualCost: 0,
+      projectedCostWithoutCache: 0,
+      savedCost: 0,
+      hitRate: 0
     },
     daily: [],
     heatmapDaily: [],

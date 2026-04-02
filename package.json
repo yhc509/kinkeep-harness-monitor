@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,yellow \"pnpm --filter @codex-monitor/api dev\" \"pnpm --filter @codex-monitor/web dev\"",
     "build": "pnpm --filter @codex-monitor/api build && pnpm --filter @codex-monitor/web build",
-    "test": "pnpm --filter @codex-monitor/api test",
+    "test": "pnpm --filter @codex-monitor/shared test && pnpm --filter @codex-monitor/api test",
     "typecheck": "pnpm --filter @codex-monitor/api typecheck && pnpm --filter @codex-monitor/web typecheck",
     "start": "pnpm --filter @codex-monitor/api start",
     "server:install-launchd": "pnpm --filter @codex-monitor/api install-server-launchd",

@@ -42,7 +42,10 @@ describe("TokenCollectorService", () => {
     expect(tokens.currentHourTokens.cachedInputTokens).toBe(20);
     expect(tokens.currentHourTokens.uncachedTokens).toBe(120);
     expect(tokens.hourly[0]?.totalTokens).toBe(140);
+    expect(tokens.hourly[0]?.uncachedInputTokens).toBe(80);
     expect(tokens.hourly[0]?.requestCount).toBe(1);
+    expect(tokens.daily[0]?.estimatedCost).toBeCloseTo(0.000805, 8);
+    expect(tokens.hourly[0]?.estimatedCost).toBeCloseTo(0.000805, 8);
     expect(tokens.modelUsage).toEqual([
       {
         modelName: "gpt-5.4",
@@ -50,6 +53,280 @@ describe("TokenCollectorService", () => {
         totalTokens: 140
       }
     ]);
+  });
+
+  it("deduplicates consecutive token_count events that repeat the same cumulative totals", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    fs.writeFileSync(
+      fixture.rolloutPath,
+      [
+        {
+          timestamp: "2026-03-14T10:00:00.000Z",
+          type: "session_meta",
+          payload: {
+            cwd: path.join(fixture.rootDir, "workspace", "demo-project", "packages", "client"),
+            model_provider: "openai"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:01.000Z",
+          type: "turn_context",
+          payload: {
+            model: "gpt-5.4"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              },
+              last_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              }
+            }
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:03.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              },
+              last_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              }
+            }
+          }
+        }
+      ].map((line) => JSON.stringify(line)).join("\n"),
+      "utf8"
+    );
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
+    expect(tokens.daily[0]).toMatchObject({
+      totalTokens: 140,
+      inputTokens: 100,
+      cachedInputTokens: 20,
+      uncachedInputTokens: 80,
+      outputTokens: 40
+    });
+    expect(tokens.hourly[0]).toMatchObject({
+      totalTokens: 140,
+      uncachedInputTokens: 80,
+      requestCount: 1
+    });
+    expect(tokens.modelUsage).toEqual([
+      {
+        modelName: "gpt-5.4",
+        modelProvider: "openai",
+        totalTokens: 140
+      }
+    ]);
+  });
+
+  it("skips token_count events when cumulative totals stay flat even if last_token_usage changes", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    fs.writeFileSync(
+      fixture.rolloutPath,
+      [
+        {
+          timestamp: "2026-03-14T10:00:00.000Z",
+          type: "session_meta",
+          payload: {
+            cwd: path.join(fixture.rootDir, "workspace", "demo-project", "packages", "client"),
+            model_provider: "openai"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:01.000Z",
+          type: "turn_context",
+          payload: {
+            model: "gpt-5.4"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              },
+              last_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              }
+            }
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:03.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              },
+              last_token_usage: {
+                output_tokens: 10,
+                total_tokens: 10
+              }
+            }
+          }
+        }
+      ].map((line) => JSON.stringify(line)).join("\n"),
+      "utf8"
+    );
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
+    expect(tokens.daily[0]).toMatchObject({
+      totalTokens: 140,
+      inputTokens: 100,
+      cachedInputTokens: 20,
+      uncachedInputTokens: 80,
+      outputTokens: 40
+    });
+    expect(tokens.hourly[0]).toMatchObject({
+      totalTokens: 140,
+      inputTokens: 100,
+      cachedInputTokens: 20,
+      uncachedInputTokens: 80,
+      outputTokens: 40,
+      requestCount: 1
+    });
+  });
+
+  it("keeps token_count events when only some cumulative metrics increase and computes per-metric deltas", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    fs.writeFileSync(
+      fixture.rolloutPath,
+      [
+        {
+          timestamp: "2026-03-14T10:00:00.000Z",
+          type: "session_meta",
+          payload: {
+            cwd: path.join(fixture.rootDir, "workspace", "demo-project", "packages", "client"),
+            model_provider: "openai"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:01.000Z",
+          type: "turn_context",
+          payload: {
+            model: "gpt-5.4"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              },
+              last_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                output_tokens: 40,
+                total_tokens: 140
+              }
+            }
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:03.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 30,
+                output_tokens: 50,
+                total_tokens: 150
+              },
+              last_token_usage: {
+                cached_input_tokens: 10,
+                output_tokens: 10,
+                total_tokens: 10
+              }
+            }
+          }
+        }
+      ].map((line) => JSON.stringify(line)).join("\n"),
+      "utf8"
+    );
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
+    expect(tokens.daily[0]).toMatchObject({
+      totalTokens: 150,
+      inputTokens: 100,
+      cachedInputTokens: 30,
+      uncachedInputTokens: 80,
+      outputTokens: 50
+    });
+    expect(tokens.hourly[0]).toMatchObject({
+      totalTokens: 150,
+      inputTokens: 100,
+      cachedInputTokens: 30,
+      uncachedInputTokens: 80,
+      outputTokens: 50,
+      requestCount: 2
+    });
   });
 
   it("attributes later token_count events to the model after turn_context changes", () => {
@@ -406,14 +683,16 @@ describe("TokenCollectorService", () => {
 
     const tokens = collector.getTokens(1, new Date("2026-03-18T10:05:00+09:00"));
     expect(tokens.daily[0]?.totalTokens).toBe(21135);
-    expect(tokens.daily[0]?.inputTokens).toBe(3);
-    expect(tokens.daily[0]?.cachedInputTokens).toBe(21121);
+    expect(tokens.daily[0]?.inputTokens).toBe(21124);
+    expect(tokens.daily[0]?.cachedInputTokens).toBe(8945);
+    expect(tokens.daily[0]?.uncachedInputTokens).toBe(12179);
     expect(tokens.daily[0]?.outputTokens).toBe(11);
     expect(tokens.dailyProviderTokens[0]).toEqual({
       day: "2026-03-18",
       codexTokens: 0,
       claudeCodeTokens: 21135
     });
+    expect(tokens.daily[0]?.estimatedCost).toBeCloseTo(0.0808625, 8);
     expect(tokens.modelUsage).toEqual([
       {
         modelName: "claude-opus-4-6",
@@ -514,8 +793,9 @@ describe("TokenCollectorService", () => {
     expect(tokens.daily[0]).toMatchObject({
       day: "2026-01-07",
       totalTokens: 152_079,
-      inputTokens: 0,
+      inputTokens: 152_079,
       cachedInputTokens: 0,
+      uncachedInputTokens: 152_079,
       outputTokens: 0
     });
     expect(tokens.dailyProviderTokens[0]).toEqual({
@@ -526,11 +806,13 @@ describe("TokenCollectorService", () => {
     expect(tokens.hourly).toContainEqual({
       hourBucket: "2026-01-07T00:00:00",
       totalTokens: 152_079,
-      inputTokens: 0,
+      inputTokens: 152_079,
       cachedInputTokens: 0,
+      uncachedInputTokens: 152_079,
       outputTokens: 0,
       reasoningOutputTokens: 0,
-      requestCount: 0
+      requestCount: 0,
+      estimatedCost: 0.756237
     });
     expect(tokens.modelUsage).toEqual([
       {
@@ -582,6 +864,81 @@ describe("TokenCollectorService", () => {
     expect(indexCount.count).toBe(0);
   });
 
+  it("removes stale synthetic stats-cache rows when the synthetic parse version changes", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+
+    collector.ensureSchema();
+
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    database.prepare(`
+      INSERT INTO rollout_hourly_usage (
+        rollout_path,
+        hour_bucket,
+        project_id,
+        project_name,
+        project_path,
+        total_tokens,
+        input_tokens,
+        cached_input_tokens,
+        uncached_input_tokens,
+        output_tokens,
+        reasoning_output_tokens,
+        request_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "__claude-code-stats__",
+      "2026-01-07T00:00:00",
+      "__claude-code__",
+      "Claude Code",
+      "",
+      99,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    );
+    database.prepare(`
+      INSERT INTO rollout_index_state (
+        rollout_path,
+        file_size,
+        mtime_ms,
+        indexed_at,
+        parse_version
+      ) VALUES (?, ?, ?, ?, ?)
+    `).run(
+      "__claude-code-stats__",
+      123,
+      456,
+      "2026-01-07T00:00:00",
+      "claude-stats-v1"
+    );
+    database.close();
+
+    collector.captureSnapshot(new Date("2026-01-08T09:00:00+09:00"));
+
+    const verifyDatabase = new DatabaseSync(fixture.config.monitorDbPath);
+    const usageCount = verifyDatabase.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_hourly_usage
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    const indexCount = verifyDatabase.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rollout_index_state
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { count: number };
+    verifyDatabase.close();
+
+    expect(usageCount.count).toBe(0);
+    expect(indexCount.count).toBe(0);
+  });
+
   it("re-imports Claude Code stats-cache data without duplicating rows", () => {
     const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
     fixtures.push(fixture);
@@ -624,6 +981,7 @@ describe("TokenCollectorService", () => {
 
     const tokens = collector.getTokens(1, new Date("2026-01-07T23:30:00+09:00"));
     expect(tokens.daily[0]?.totalTokens).toBe(70);
+    expect(tokens.daily[0]?.uncachedInputTokens).toBe(70);
     expect(tokens.modelUsage).toEqual([
       {
         modelName: "claude-opus-4-5-20250514",

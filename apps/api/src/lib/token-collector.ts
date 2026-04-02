@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  CacheSavings,
   CollectorRun,
   DailyTokenPoint,
   HourlyTokenUsage,
@@ -14,14 +15,22 @@ import type {
   TokenSyncStats,
   TokensResponse
 } from "@codex-monitor/shared";
-import { projectTokenUsageResponseSchema, tokenSyncResultSchema, tokensResponseSchema } from "@codex-monitor/shared";
+import {
+  calculateCacheHitRate,
+  DEFAULT_MODEL_PRICING_KEY,
+  estimateUsageCost,
+  estimateUsageCostWithoutCache,
+  projectTokenUsageResponseSchema,
+  tokenSyncResultSchema,
+  tokensResponseSchema
+} from "@codex-monitor/shared";
 import type { AppConfig } from "../config";
 import { formatDayKey, formatHourBucket, startOfLocalDay, startOfLocalHour, toLocalDateTime } from "./format";
 import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
 
-const CACHE_PARSE_VERSION = "5";
+const CACHE_PARSE_VERSION = "8";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
 const PROJECT_USAGE_LIMIT = 12;
@@ -33,7 +42,7 @@ const UNKNOWN_MODEL_NAME = "Unknown Model";
 const CLAUDE_CODE_STATS_ROLLOUT_PATH = "__claude-code-stats__";
 const CLAUDE_CODE_STATS_PROJECT_ID = "__claude-code__";
 const CLAUDE_CODE_STATS_PROJECT_NAME = "Claude Code";
-const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v1";
+const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v3";
 const CLAUDE_CODE_STATS_MODEL_PROVIDER = "anthropic";
 const SYNTHETIC_ROLLOUT_PATHS = new Set([CLAUDE_CODE_STATS_ROLLOUT_PATH]);
 
@@ -89,6 +98,8 @@ interface UsageAccumulator {
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  uncachedInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
   requestCount: number;
@@ -106,6 +117,8 @@ interface HourlyUsageRow {
   total_tokens: number;
   input_tokens: number;
   cached_input_tokens: number;
+  cache_creation_input_tokens: number;
+  uncached_input_tokens: number;
   output_tokens: number;
   reasoning_output_tokens: number;
   request_count: number;
@@ -116,6 +129,8 @@ interface DailyUsageRow {
   total_tokens: number;
   input_tokens: number;
   cached_input_tokens: number;
+  cache_creation_input_tokens: number;
+  uncached_input_tokens: number;
   output_tokens: number;
 }
 
@@ -138,6 +153,12 @@ interface ModelUsageAccumulator {
   modelName: string;
   modelProvider: string | null;
   totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
   requestCount: number;
 }
 
@@ -147,12 +168,40 @@ interface ModelUsageRow {
   total_tokens: number;
 }
 
+interface GroupedModelUsageRow {
+  bucket_key: string;
+  model_name: string;
+  model_provider: string | null;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_creation_input_tokens: number;
+  uncached_input_tokens: number;
+  output_tokens: number;
+}
+
+interface CostSummary {
+  actualCost: number;
+  projectedCostWithoutCache: number;
+  cachedInputTokens: number;
+  totalInputTokens: number;
+}
+
 interface StatsCacheDailyUsage {
   hourBucket: string;
   totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
   modelUsage: Array<{
     modelName: string;
     totalTokens: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    uncachedInputTokens: number;
+    outputTokens: number;
   }>;
 }
 
@@ -187,6 +236,8 @@ export class TokenCollectorService {
         total_tokens INTEGER NOT NULL,
         input_tokens INTEGER NOT NULL,
         cached_input_tokens INTEGER NOT NULL,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
         output_tokens INTEGER NOT NULL,
         reasoning_output_tokens INTEGER NOT NULL,
         request_count INTEGER NOT NULL,
@@ -199,6 +250,12 @@ export class TokenCollectorService {
         model_name TEXT NOT NULL,
         model_provider TEXT NOT NULL DEFAULT '',
         total_tokens INTEGER NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
         request_count INTEGER NOT NULL,
         PRIMARY KEY (rollout_path, hour_bucket, model_name, model_provider)
       );
@@ -224,6 +281,14 @@ export class TokenCollectorService {
     ensureColumn(database, "rollout_hourly_usage", "project_id", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_name", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_path", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_hourly_usage", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_usage", "uncached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_model_usage", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_model_usage", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_model_usage", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_model_usage", "uncached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_model_usage", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_hourly_model_usage", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
     database.close();
   }
 
@@ -263,10 +328,12 @@ export class TokenCollectorService {
           total_tokens,
           input_tokens,
           cached_input_tokens,
+          cache_creation_input_tokens,
+          uncached_input_tokens,
           output_tokens,
           reasoning_output_tokens,
           request_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertModelUsage = database.prepare(`
         INSERT OR REPLACE INTO rollout_hourly_model_usage (
@@ -275,8 +342,14 @@ export class TokenCollectorService {
           model_name,
           model_provider,
           total_tokens,
+          input_tokens,
+          cached_input_tokens,
+          cache_creation_input_tokens,
+          uncached_input_tokens,
+          output_tokens,
+          reasoning_output_tokens,
           request_count
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const entry of dailyUsage) {
@@ -287,9 +360,11 @@ export class TokenCollectorService {
           CLAUDE_CODE_STATS_PROJECT_NAME,
           "",
           entry.totalTokens,
-          0,
-          0,
-          0,
+          entry.inputTokens,
+          entry.cachedInputTokens,
+          entry.cacheCreationInputTokens,
+          entry.uncachedInputTokens,
+          entry.outputTokens,
           0,
           0
         );
@@ -301,6 +376,12 @@ export class TokenCollectorService {
             modelUsage.modelName,
             CLAUDE_CODE_STATS_MODEL_PROVIDER,
             modelUsage.totalTokens,
+            modelUsage.inputTokens,
+            modelUsage.cachedInputTokens,
+            modelUsage.cacheCreationInputTokens,
+            modelUsage.uncachedInputTokens,
+            modelUsage.outputTokens,
+            0,
             0
           );
         }
@@ -390,6 +471,11 @@ export class TokenCollectorService {
     const startDate = startOfLocalDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (rangeDays - 1)));
     const currentHourBucket = formatHourBucket(now);
     const hourlyStartDate = startOfLocalHour(new Date(now.getTime() - ((HOURLY_DEBUG_WINDOW_HOURS - 1) * 60 * 60 * 1000)));
+    const costStartHourBucket = formatHourBucket(
+      startDate.getTime() <= hourlyStartDate.getTime()
+        ? startDate
+        : hourlyStartDate
+    );
 
     const dailyRows = database.prepare(`
       SELECT
@@ -397,6 +483,8 @@ export class TokenCollectorService {
         SUM(total_tokens) AS total_tokens,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
         SUM(output_tokens) AS output_tokens
       FROM rollout_hourly_usage
       WHERE hour_bucket >= ?
@@ -433,6 +521,8 @@ export class TokenCollectorService {
         SUM(total_tokens) AS total_tokens,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
         SUM(request_count) AS request_count
@@ -465,6 +555,21 @@ export class TokenCollectorService {
       GROUP BY model_name, model_provider
       ORDER BY total_tokens DESC, model_name ASC
     `).all(formatHourBucket(startDate)) as unknown as ModelUsageRow[];
+    const groupedModelUsageRows = database.prepare(`
+      SELECT
+        hour_bucket AS bucket_key,
+        model_name,
+        model_provider,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
+        SUM(output_tokens) AS output_tokens
+      FROM rollout_hourly_model_usage
+      WHERE hour_bucket >= ?
+      GROUP BY hour_bucket, model_name, model_provider
+      ORDER BY bucket_key ASC, model_name ASC
+    `).all(costStartHourBucket) as unknown as GroupedModelUsageRow[];
 
     const lastSyncedRow = database.prepare(`
       SELECT finished_at
@@ -475,6 +580,18 @@ export class TokenCollectorService {
     `).get() as { finished_at: string } | undefined;
     database.close();
 
+    const costSummaries = summarizeCostUsage(groupedModelUsageRows);
+    for (const row of dailyRows) {
+      if (!costSummaries.daily.has(row.day)) {
+        costSummaries.daily.set(row.day, summarizeAggregateUsageRow(row));
+      }
+    }
+    for (const row of hourlyRows) {
+      if (!costSummaries.hourly.has(row.hour_bucket)) {
+        costSummaries.hourly.set(row.hour_bucket, summarizeAggregateUsageRow(row));
+      }
+    }
+
     const dailyMap = new Map<string, DailyTokenPoint>();
     for (const row of dailyRows) {
       dailyMap.set(row.day, {
@@ -483,8 +600,9 @@ export class TokenCollectorService {
         inputTokens: row.input_tokens,
         cachedInputTokens: row.cached_input_tokens,
         uncachedTokens: Math.max(0, row.total_tokens - row.cached_input_tokens),
-        uncachedInputTokens: Math.max(0, row.input_tokens - row.cached_input_tokens),
-        outputTokens: row.output_tokens
+        uncachedInputTokens: row.uncached_input_tokens,
+        outputTokens: row.output_tokens,
+        estimatedCost: costSummaries.daily.get(row.day)?.actualCost ?? 0
       });
     }
 
@@ -511,7 +629,10 @@ export class TokenCollectorService {
       ...(providerDailyMap.get(point.day) ?? { codexTokens: 0, claudeCodeTokens: 0 })
     }));
 
-    const hourly = hourlyRows.map(mapHourlyUsageRow);
+    const hourly = hourlyRows.map((row) => mapHourlyUsageRow(
+      row,
+      costSummaries.hourly.get(row.hour_bucket)?.actualCost ?? 0
+    ));
     const currentHour = hourly.find((entry) => entry.hourBucket === currentHourBucket);
     const currentHourTokens = currentHour
       ? createTokenBreakdown(currentHour.totalTokens, currentHour.cachedInputTokens)
@@ -532,6 +653,8 @@ export class TokenCollectorService {
 
   getOverviewTokens(rangeDays: number, now = new Date()): {
     todayTokens: TokenBreakdown;
+    todayCost: number;
+    cacheSavings: CacheSavings;
     daily: DailyTokenPoint[];
     heatmapDaily: DailyTokenPoint[];
     averageTokens7d: TokenBreakdown;
@@ -539,15 +662,18 @@ export class TokenCollectorService {
   } {
     const tokens = this.getTokens(Math.max(rangeDays, 365), now);
     const daily = tokens.daily.slice(-rangeDays);
+    const today = daily.at(-1) ?? emptyDailyTokenPoint(formatDayKey(startOfLocalDay(now)));
     const averageTokens7d = createTokenBreakdown(
       Math.round(daily.reduce((sum, point) => sum + point.totalTokens, 0) / Math.max(daily.length, 1)),
       Math.round(daily.reduce((sum, point) => sum + point.cachedInputTokens, 0) / Math.max(daily.length, 1))
     );
+    const todayCost = today.estimatedCost;
+    const cacheSavings = this.getCacheSavingsForDay(today.day);
 
     return {
-      todayTokens: daily.at(-1)
-        ? createTokenBreakdown(daily.at(-1)!.totalTokens, daily.at(-1)!.cachedInputTokens)
-        : emptyTokenBreakdown(),
+      todayTokens: createTokenBreakdown(today.totalTokens, today.cachedInputTokens),
+      todayCost,
+      cacheSavings,
       daily,
       heatmapDaily: tokens.daily,
       averageTokens7d,
@@ -614,7 +740,62 @@ export class TokenCollectorService {
     });
   }
 
+  private getCacheSavingsForDay(day: string): CacheSavings {
+    const startDate = parseDayKey(day, new Date());
+    const nextDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 1);
+    const database = this.openMonitorDb();
+    const rows = database.prepare(`
+      SELECT
+        hour_bucket AS bucket_key,
+        model_name,
+        model_provider,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
+        SUM(output_tokens) AS output_tokens
+      FROM rollout_hourly_model_usage
+      WHERE hour_bucket >= ?
+        AND hour_bucket < ?
+      GROUP BY hour_bucket, model_name, model_provider
+      ORDER BY bucket_key ASC, model_name ASC
+    `).all(
+      formatHourBucket(startDate),
+      formatHourBucket(nextDate)
+    ) as unknown as GroupedModelUsageRow[];
+    const aggregateRow = database.prepare(`
+      SELECT
+        ? AS day,
+        SUM(total_tokens) AS total_tokens,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
+        SUM(output_tokens) AS output_tokens
+      FROM rollout_hourly_usage
+      WHERE hour_bucket >= ?
+        AND hour_bucket < ?
+    `).get(
+      day,
+      formatHourBucket(startDate),
+      formatHourBucket(nextDate)
+    ) as DailyUsageRow | undefined;
+    database.close();
+
+    if (rows.length > 0) {
+      return toCacheSavings(summarizeCostUsage(rows).daily.get(day));
+    }
+
+    return aggregateRow
+      ? toCacheSavings(summarizeAggregateUsageRow(aggregateRow))
+      : toCacheSavings(undefined);
+  }
+
   private isRefreshNeeded(now: Date): boolean {
+    if (this.hasStaleCacheVersion()) {
+      return true;
+    }
+
     const lastRun = this.getLastRun();
     if (!lastRun) {
       return true;
@@ -626,6 +807,29 @@ export class TokenCollectorService {
     }
 
     return (now.getTime() - finishedAt) > TOKEN_CACHE_STALE_MS;
+  }
+
+  private hasStaleCacheVersion(): boolean {
+    const database = this.openMonitorDb();
+    const staleRow = database.prepare(`
+      SELECT 1 AS has_stale_cache
+      FROM rollout_index_state
+      WHERE (
+        rollout_path = ?
+        AND parse_version != ?
+      ) OR (
+        rollout_path != ?
+        AND parse_version != ?
+      )
+      LIMIT 1
+    `).get(
+      CLAUDE_CODE_STATS_ROLLOUT_PATH,
+      CLAUDE_CODE_STATS_PARSE_VERSION,
+      CLAUDE_CODE_STATS_ROLLOUT_PATH,
+      CACHE_PARSE_VERSION
+    ) as { has_stale_cache: number } | undefined;
+    database.close();
+    return Boolean(staleRow?.has_stale_cache);
   }
 
   private prepareSyncState(): SyncPreparation {
@@ -673,11 +877,14 @@ export class TokenCollectorService {
     const deletedPaths = indexedRows
       .map((row) => row.rollout_path)
       .filter((rolloutPath) => !currentPaths.has(rolloutPath) && !isSyntheticRolloutPath(rolloutPath));
+    const staleSyntheticPaths = indexedRows
+      .filter((row) => isSyntheticRolloutPath(row.rollout_path) && row.parse_version !== CLAUDE_CODE_STATS_PARSE_VERSION)
+      .map((row) => row.rollout_path);
 
     return {
       totalRollouts: files.length,
       changedFiles,
-      deletedPaths,
+      deletedPaths: [...new Set([...deletedPaths, ...staleSyntheticPaths])],
       hasCache: usageCount.count > 0 || modelUsageCount.count > 0 || indexedRows.length > 0
     };
   }
@@ -721,10 +928,12 @@ export class TokenCollectorService {
             total_tokens,
             input_tokens,
             cached_input_tokens,
+            cache_creation_input_tokens,
+            uncached_input_tokens,
             output_tokens,
             reasoning_output_tokens,
             request_count
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const insertModelUsage = database.prepare(`
           INSERT INTO rollout_hourly_model_usage (
@@ -733,8 +942,14 @@ export class TokenCollectorService {
             model_name,
             model_provider,
             total_tokens,
+            input_tokens,
+            cached_input_tokens,
+            cache_creation_input_tokens,
+            uncached_input_tokens,
+            output_tokens,
+            reasoning_output_tokens,
             request_count
-          ) VALUES (?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const project = parsed.project ?? createUnknownProjectInfo();
 
@@ -748,6 +963,8 @@ export class TokenCollectorService {
             usage.totalTokens,
             usage.inputTokens,
             usage.cachedInputTokens,
+            usage.cacheCreationInputTokens,
+            usage.uncachedInputTokens,
             usage.outputTokens,
             usage.reasoningOutputTokens,
             usage.requestCount
@@ -761,6 +978,12 @@ export class TokenCollectorService {
             modelUsage.modelName,
             modelUsage.modelProvider ?? "",
             modelUsage.totalTokens,
+            modelUsage.inputTokens,
+            modelUsage.cachedInputTokens,
+            modelUsage.cacheCreationInputTokens,
+            modelUsage.uncachedInputTokens,
+            modelUsage.outputTokens,
+            modelUsage.reasoningOutputTokens,
             modelUsage.requestCount
           );
         }
@@ -948,7 +1171,6 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
       continue;
     }
 
-    tokenEvents += 1;
     const info = isRecord(payload.info) ? payload.info : {};
     const totalUsage = parseUsageBlock(info.total_token_usage);
     const lastUsage = parseUsageBlock(info.last_token_usage);
@@ -969,18 +1191,27 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
       continue;
     }
 
+    const nextTotals = mergeUsageState(previousTotals, totalUsage);
+    if (!hasCumulativeUsageProgress(totalUsage, previousTotals)) {
+      previousTotals = nextTotals;
+      continue;
+    }
+
     const delta = resolveUsageDelta(lastUsage, totalUsage, previousTotals);
-    previousTotals = mergeUsageState(previousTotals, totalUsage);
+    previousTotals = nextTotals;
 
     if (delta.totalTokens <= 0) {
       continue;
     }
+
+    tokenEvents += 1;
 
     const hourBucket = formatHourBucket(timestamp);
     const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator();
     accumulator.totalTokens += delta.totalTokens;
     accumulator.inputTokens += delta.inputTokens;
     accumulator.cachedInputTokens += delta.cachedInputTokens;
+    accumulator.uncachedInputTokens += Math.max(0, delta.inputTokens - delta.cachedInputTokens);
     accumulator.outputTokens += delta.outputTokens;
     accumulator.reasoningOutputTokens += delta.reasoningOutputTokens;
     accumulator.requestCount += 1;
@@ -990,6 +1221,11 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     const modelUsage = hourlyModelUsage.get(modelUsageKey)
       ?? createEmptyModelUsageAccumulator(hourBucket, currentModelName, currentModelProvider);
     modelUsage.totalTokens += delta.totalTokens;
+    modelUsage.inputTokens += delta.inputTokens;
+    modelUsage.cachedInputTokens += delta.cachedInputTokens;
+    modelUsage.uncachedInputTokens += Math.max(0, delta.inputTokens - delta.cachedInputTokens);
+    modelUsage.outputTokens += delta.outputTokens;
+    modelUsage.reasoningOutputTokens += delta.reasoningOutputTokens;
     modelUsage.requestCount += 1;
     hourlyModelUsage.set(modelUsageKey, modelUsage);
   }
@@ -1064,12 +1300,16 @@ function parseClaudeCodeTranscriptUsage(
       continue;
     }
 
-    const inputTokens = readUsageNumber(usage, "input_tokens");
+    const uncachedInputTokens = readUsageNumber(usage, "input_tokens");
     const outputTokens = readUsageNumber(usage, "output_tokens");
     const cacheCreationTokens = readUsageNumber(usage, "cache_creation_input_tokens");
     const cacheReadTokens = readUsageNumber(usage, "cache_read_input_tokens");
-    const cachedInputTokens = cacheCreationTokens + cacheReadTokens;
-    const totalTokens = inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens;
+    // Claude reports uncached input, cache writes, and cache reads separately.
+    // Normalize to the shared schema so inputTokens is total input and
+    // cachedInputTokens only represents cache-hit tokens.
+    const cachedInputTokens = cacheReadTokens;
+    const inputTokens = uncachedInputTokens + cacheCreationTokens + cacheReadTokens;
+    const totalTokens = inputTokens + outputTokens;
 
     if (totalTokens <= 0) {
       continue;
@@ -1082,6 +1322,8 @@ function parseClaudeCodeTranscriptUsage(
     accumulator.totalTokens += totalTokens;
     accumulator.inputTokens += inputTokens;
     accumulator.cachedInputTokens += cachedInputTokens;
+    accumulator.cacheCreationInputTokens += cacheCreationTokens;
+    accumulator.uncachedInputTokens += uncachedInputTokens + cacheCreationTokens;
     accumulator.outputTokens += outputTokens;
     accumulator.requestCount += 1;
     hourlyUsage.set(hourBucket, accumulator);
@@ -1091,6 +1333,11 @@ function parseClaudeCodeTranscriptUsage(
     const modelUsage = hourlyModelUsage.get(modelUsageKey)
       ?? createEmptyModelUsageAccumulator(hourBucket, modelName, modelProvider);
     modelUsage.totalTokens += totalTokens;
+    modelUsage.inputTokens += inputTokens;
+    modelUsage.cachedInputTokens += cachedInputTokens;
+    modelUsage.cacheCreationInputTokens += cacheCreationTokens;
+    modelUsage.uncachedInputTokens += uncachedInputTokens;
+    modelUsage.outputTokens += outputTokens;
     modelUsage.requestCount += 1;
     hourlyModelUsage.set(modelUsageKey, modelUsage);
   }
@@ -1133,7 +1380,15 @@ function resolveUsageDelta(
   };
 }
 
+/**
+ * Assumes Codex CLI total_token_usage cumulative counters are monotonically increasing within a session.
+ * If an individual metric stays flat or decreases, defensively clamp that metric's delta to 0.
+ */
 function resolveMetricDelta(lastValue: number | null, currentTotal: number | null, previousTotal: number | null): number {
+  if (currentTotal !== null && previousTotal !== null && currentTotal <= previousTotal) {
+    return 0;
+  }
+
   if (lastValue !== null) {
     return Math.max(0, lastValue);
   }
@@ -1155,11 +1410,36 @@ function mergeUsageState(previous: ParsedUsageBlock, next: ParsedUsageBlock): Pa
   };
 }
 
+/**
+ * Assumes Codex CLI total_token_usage cumulative counters are monotonically increasing within a session.
+ * Treat a snapshot as progress only when at least one reported cumulative metric increases.
+ */
+function hasCumulativeUsageProgress(totalUsage: ParsedUsageBlock, previousTotals: ParsedUsageBlock): boolean {
+  let hasTotals = false;
+
+  for (const metric of ["totalTokens", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens"] as const) {
+    const nextValue = totalUsage[metric];
+    if (nextValue === null) {
+      continue;
+    }
+
+    hasTotals = true;
+    const previousValue = previousTotals[metric];
+    if (previousValue === null || nextValue > previousValue) {
+      return true;
+    }
+  }
+
+  return !hasTotals;
+}
+
 function createEmptyUsageAccumulator(): UsageAccumulator {
   return {
     totalTokens: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    uncachedInputTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
     requestCount: 0
@@ -1176,6 +1456,12 @@ function createEmptyModelUsageAccumulator(
     modelName: modelName?.trim() || UNKNOWN_MODEL_NAME,
     modelProvider: normalizeProvider(modelProvider),
     totalTokens: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    uncachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
     requestCount: 0
   };
 }
@@ -1190,15 +1476,17 @@ function emptyParsedUsage(): ParsedUsageBlock {
   };
 }
 
-function mapHourlyUsageRow(row: HourlyUsageRow): HourlyTokenUsage {
+function mapHourlyUsageRow(row: HourlyUsageRow, estimatedCost: number): HourlyTokenUsage {
   return {
     hourBucket: row.hour_bucket,
     totalTokens: row.total_tokens,
     inputTokens: row.input_tokens,
     cachedInputTokens: row.cached_input_tokens,
+    uncachedInputTokens: row.uncached_input_tokens,
     outputTokens: row.output_tokens,
     reasoningOutputTokens: row.reasoning_output_tokens,
-    requestCount: row.request_count
+    requestCount: row.request_count,
+    estimatedCost
   };
 }
 
@@ -1235,6 +1523,103 @@ function summarizeModelUsage(items: ModelTokenUsageItem[]): ModelTokenUsageItem[
   return visibleItems;
 }
 
+function summarizeCostUsage(rows: GroupedModelUsageRow[]): {
+  daily: Map<string, CostSummary>;
+  hourly: Map<string, CostSummary>;
+} {
+  const daily = new Map<string, CostSummary>();
+  const hourly = new Map<string, CostSummary>();
+
+  for (const row of rows) {
+    const bucketKey = row.bucket_key;
+    const usage = {
+      inputTokens: row.input_tokens,
+      cachedInputTokens: row.cached_input_tokens,
+      uncachedInputTokens: row.uncached_input_tokens,
+      cacheCreationInputTokens: row.cache_creation_input_tokens,
+      outputTokens: row.output_tokens
+    };
+    const actualCost = estimateUsageCost(usage, row.model_name);
+    const projectedCostWithoutCache = estimateUsageCostWithoutCache(usage, row.model_name);
+    const dayKey = bucketKey.slice(0, 10);
+    const totalInputTokens = row.cached_input_tokens + row.uncached_input_tokens + row.cache_creation_input_tokens;
+
+    mergeCostSummary(
+      hourly,
+      bucketKey,
+      actualCost,
+      projectedCostWithoutCache,
+      row.cached_input_tokens,
+      totalInputTokens
+    );
+    mergeCostSummary(
+      daily,
+      dayKey,
+      actualCost,
+      projectedCostWithoutCache,
+      row.cached_input_tokens,
+      totalInputTokens
+    );
+  }
+
+  return { daily, hourly };
+}
+
+function mergeCostSummary(
+  summaries: Map<string, CostSummary>,
+  key: string,
+  actualCost: number,
+  projectedCostWithoutCache: number,
+  cachedInputTokens: number,
+  totalInputTokens: number
+): void {
+  const summary = summaries.get(key) ?? createEmptyCostSummary();
+  summary.actualCost += actualCost;
+  summary.projectedCostWithoutCache += projectedCostWithoutCache;
+  summary.cachedInputTokens += cachedInputTokens;
+  summary.totalInputTokens += totalInputTokens;
+  summaries.set(key, summary);
+}
+
+function createEmptyCostSummary(): CostSummary {
+  return {
+    actualCost: 0,
+    projectedCostWithoutCache: 0,
+    cachedInputTokens: 0,
+    totalInputTokens: 0
+  };
+}
+
+function toCacheSavings(summary: CostSummary | undefined): CacheSavings {
+  const resolved = summary ?? createEmptyCostSummary();
+  return {
+    actualCost: roundUsd(resolved.actualCost),
+    projectedCostWithoutCache: roundUsd(resolved.projectedCostWithoutCache),
+    savedCost: roundUsd(resolved.projectedCostWithoutCache - resolved.actualCost),
+    hitRate: calculateCacheHitRate({
+      inputTokens: resolved.totalInputTokens,
+      cachedInputTokens: resolved.cachedInputTokens
+    })
+  };
+}
+
+function summarizeAggregateUsageRow(row: DailyUsageRow | HourlyUsageRow): CostSummary {
+  const usage = {
+    inputTokens: row.input_tokens,
+    cachedInputTokens: row.cached_input_tokens,
+    cacheCreationInputTokens: row.cache_creation_input_tokens,
+    uncachedInputTokens: row.uncached_input_tokens,
+    outputTokens: row.output_tokens
+  };
+
+  return {
+    actualCost: estimateUsageCost(usage, DEFAULT_MODEL_PRICING_KEY),
+    projectedCostWithoutCache: estimateUsageCostWithoutCache(usage, DEFAULT_MODEL_PRICING_KEY),
+    cachedInputTokens: row.cached_input_tokens,
+    totalInputTokens: row.input_tokens
+  };
+}
+
 function createTokenBreakdown(totalTokens: number, cachedInputTokens: number): TokenBreakdown {
   return {
     totalTokens,
@@ -1255,7 +1640,8 @@ function emptyDailyTokenPoint(day: string): DailyTokenPoint {
     cachedInputTokens: 0,
     uncachedTokens: 0,
     uncachedInputTokens: 0,
-    outputTokens: 0
+    outputTokens: 0,
+    estimatedCost: 0
   };
 }
 
@@ -1328,7 +1714,12 @@ function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
 
         return [{
           modelName: normalizedName,
-          totalTokens: normalizedTotal
+          totalTokens: normalizedTotal,
+          inputTokens: normalizedTotal,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          uncachedInputTokens: normalizedTotal,
+          outputTokens: 0
         }];
       })
       .sort((left, right) => left.modelName.localeCompare(right.modelName));
@@ -1336,6 +1727,13 @@ function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
     dailyUsage.push({
       hourBucket,
       totalTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      // stats-cache exposes per-day totals, but not reliable daily cache-hit/output splits.
+      // Keep synthetic rows non-zero by treating the daily total as estimated uncached input.
+      inputTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      uncachedInputTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      outputTokens: 0,
       modelUsage
     });
   }
@@ -1373,6 +1771,10 @@ function normalizeStatsTokenCount(value: unknown): number | null {
   }
 
   return null;
+}
+
+function roundUsd(value: number): number {
+  return Number(value.toFixed(8));
 }
 
 function isSyntheticRolloutPath(rolloutPath: string): boolean {

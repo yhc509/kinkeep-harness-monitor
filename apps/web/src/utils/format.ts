@@ -2,6 +2,25 @@ export function formatNumber(value: number): string {
   return value.toLocaleString("en-US");
 }
 
+export function formatCurrency(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "$0.00";
+  }
+
+  const absoluteValue = Math.abs(value);
+  if (absoluteValue > 0 && absoluteValue < 0.0001) {
+    return value < 0 ? "-<$0.0001" : "<$0.0001";
+  }
+
+  const fractionDigits = absoluteValue >= 0.01 ? 2 : 4;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits
+  }).format(value);
+}
+
 export function formatShortNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
     notation: "compact",
@@ -49,6 +68,14 @@ export function formatHour(value: string): string {
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
+}
+
+export function formatPercent(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
+  return `${(value * 100).toFixed(value >= 0.1 ? 0 : 1)}%`;
 }
 
 export function statusLabel(status: "success" | "warning" | "failure"): string {

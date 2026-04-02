@@ -101,9 +101,11 @@ export const hourlyTokenUsageSchema = z.object({
   totalTokens: z.number(),
   inputTokens: z.number(),
   cachedInputTokens: z.number(),
+  uncachedInputTokens: z.number(),
   outputTokens: z.number(),
   reasoningOutputTokens: z.number(),
-  requestCount: z.number()
+  requestCount: z.number(),
+  estimatedCost: z.number()
 });
 
 export const tokenBreakdownSchema = z.object({
@@ -119,7 +121,15 @@ export const dailyTokenPointSchema = z.object({
   cachedInputTokens: z.number(),
   uncachedTokens: z.number(),
   uncachedInputTokens: z.number(),
-  outputTokens: z.number()
+  outputTokens: z.number(),
+  estimatedCost: z.number()
+});
+
+export const cacheSavingsSchema = z.object({
+  actualCost: z.number(),
+  projectedCostWithoutCache: z.number(),
+  savedCost: z.number(),
+  hitRate: z.number()
 });
 
 export const dailyProviderTokensSchema = z.object({
@@ -163,6 +173,8 @@ export const overviewStatsSchema = z.object({
 
 export const overviewResponseSchema = z.object({
   stats: overviewStatsSchema,
+  todayCost: z.number(),
+  cacheSavings: cacheSavingsSchema,
   daily: z.array(dailyTokenPointSchema),
   heatmapDaily: z.array(dailyTokenPointSchema),
   averageTokens7d: tokenBreakdownSchema,
@@ -286,6 +298,7 @@ export type CollectorRun = z.infer<typeof collectorRunSchema>;
 export type HourlyTokenUsage = z.infer<typeof hourlyTokenUsageSchema>;
 export type TokenBreakdown = z.infer<typeof tokenBreakdownSchema>;
 export type DailyTokenPoint = z.infer<typeof dailyTokenPointSchema>;
+export type CacheSavings = z.infer<typeof cacheSavingsSchema>;
 export type DailyProviderTokens = z.infer<typeof dailyProviderTokensSchema>;
 export type TokenSyncStats = z.infer<typeof tokenSyncStatsSchema>;
 export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;

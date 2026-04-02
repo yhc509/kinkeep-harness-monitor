@@ -10,7 +10,7 @@ import { ProjectBubbleChart } from "../components/ProjectBubbleChart";
 import { StatStrip } from "../components/StatStrip";
 import { StatusPill } from "../components/StatusPill";
 import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
-import { formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
+import { formatCurrency, formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
 
 const ranges = [7, 30, 90];
 const projectUnits: Array<{ value: TokenPeriodUnit; label: string }> = [
@@ -27,6 +27,29 @@ function formatChartValue(value: number | string | readonly (number | string)[] 
   const resolvedValue = Array.isArray(value) ? value[0] : value;
   const numericValue = typeof resolvedValue === "number" ? resolvedValue : Number(resolvedValue);
   return Number.isFinite(numericValue) ? formatNumber(numericValue) : String(resolvedValue);
+}
+
+interface DailyChartPoint {
+  day: string;
+  totalTokens: number;
+  codexTokens: number;
+  claudeCodeTokens: number;
+  estimatedCost: number;
+}
+
+interface HourlyTooltipPayload {
+  hourBucket: string;
+  totalTokens: number;
+  estimatedCost: number;
+}
+
+interface ChartTooltipProps<T> {
+  active?: boolean;
+  payload?: Array<{
+    payload: T;
+    value?: number | string;
+    name?: string | number;
+  }>;
 }
 
 export function TokensPage() {
@@ -49,7 +72,7 @@ export function TokensPage() {
   const dailyProviderTokenMap = new Map(
     (tokens.data?.dailyProviderTokens ?? []).map((entry) => [entry.day, entry])
   );
-  const dailyChartData = (tokens.data?.daily ?? []).map((point) => {
+  const dailyChartData: DailyChartPoint[] = (tokens.data?.daily ?? []).map((point) => {
     const providerEntry = dailyProviderTokenMap.get(point.day);
     return {
       ...point,
@@ -57,6 +80,11 @@ export function TokensPage() {
       claudeCodeTokens: providerEntry?.claudeCodeTokens ?? 0
     };
   });
+  const todayPoint = tokens.data?.daily.at(-1);
+  const todayCost = todayPoint?.estimatedCost ?? 0;
+  const trailingSevenDayAverageCost = trailingSevenDays.length > 0
+    ? trailingSevenDays.reduce((sum, point) => sum + point.estimatedCost, 0) / trailingSevenDays.length
+    : 0;
   const activeProjectAnchorDay = projectUsage.data?.anchorDay ?? projectAnchorDay;
 
   async function handleSync() {
@@ -119,7 +147,7 @@ export function TokensPage() {
                 {
                   label: "Tokens today",
                   value: formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0),
-                  meta: "Total",
+                  meta: `Estimated ${formatCurrency(todayCost)}`,
                   accent: "cool",
                   icon: Flame
                 },
@@ -131,7 +159,7 @@ export function TokensPage() {
                       / Math.max(trailingSevenDays.length, 1)
                     )
                   ),
-                  meta: "Total",
+                  meta: `Cost avg ${formatCurrency(trailingSevenDayAverageCost)}`,
                   icon: CalendarDays
                 }
               ]}
@@ -154,10 +182,15 @@ export function TokensPage() {
                       </button>
                     ))}
                   </div>
-                  <span className="panel-badge">
-                    <Clock3 size={13} strokeWidth={2.2} />
-                    Today {formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0)}
-                  </span>
+                  <div className="panel-badges">
+                    <span className="panel-badge">
+                      <Clock3 size={13} strokeWidth={2.2} />
+                      Today {formatNumber(tokens.data.daily.at(-1)?.totalTokens ?? 0)}
+                    </span>
+                    <span className="panel-badge muted-badge">
+                      Cost {formatCurrency(todayCost)}
+                    </span>
+                  </div>
                 </>
               )}
             >
@@ -185,7 +218,7 @@ export function TokensPage() {
                     />
                     <Tooltip
                       cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                      formatter={(value, name) => [formatChartValue(value), String(name ?? "")]}
+                      content={<DailyTokensTooltip />}
                     />
                     <Bar
                       dataKey="codexTokens"
@@ -296,7 +329,7 @@ export function TokensPage() {
                       />
                       <Tooltip
                         cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                        formatter={(value) => [formatChartValue(value), "Total tokens"]}
+                        content={<HourlyTokensTooltip />}
                       />
                       <Bar
                         dataKey="totalTokens"
@@ -313,9 +346,9 @@ export function TokensPage() {
                     <article key={entry.hourBucket} className="snapshot-row">
                       <div>
                         <strong>{formatDateTime(entry.hourBucket)}</strong>
-                        <p>{formatNumber(entry.requestCount)} requests</p>
+                        <p>{formatNumber(entry.requestCount)} token events</p>
                       </div>
-                      <span>{formatNumber(entry.totalTokens)}</span>
+                      <span>{formatNumber(entry.totalTokens)} · {formatCurrency(entry.estimatedCost)}</span>
                     </article>
                     ))}
                   </div>
@@ -350,6 +383,38 @@ export function TokensPage() {
           </>
         ) : null}
       </AsyncPane>
+    </div>
+  );
+}
+
+function DailyTokensTooltip({ active, payload }: ChartTooltipProps<DailyChartPoint>) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      <strong>{formatDay(point.day)}</strong>
+      <p>Total tokens {formatNumber(point.totalTokens)}</p>
+      <p>Estimated cost {formatCurrency(point.estimatedCost)}</p>
+      {point.codexTokens > 0 ? <p>Codex {formatNumber(point.codexTokens)}</p> : null}
+      {point.claudeCodeTokens > 0 ? <p>Claude Code {formatNumber(point.claudeCodeTokens)}</p> : null}
+    </div>
+  );
+}
+
+function HourlyTokensTooltip({ active, payload }: ChartTooltipProps<HourlyTooltipPayload>) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      <strong>{formatDateTime(point.hourBucket)}</strong>
+      <p>Total tokens {formatNumber(point.totalTokens)}</p>
+      <p>Estimated cost {formatCurrency(point.estimatedCost)}</p>
     </div>
   );
 }
