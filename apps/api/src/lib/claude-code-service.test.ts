@@ -79,6 +79,13 @@ describe("ClaudeCodeDataService", () => {
         cachedInputTokens: 0,
         uncachedTokens: 0
       },
+      todayCost: 0,
+      cacheSavings: {
+        actualCost: 0,
+        projectedCostWithoutCache: 0,
+        savedCost: 0,
+        hitRate: 0
+      },
       daily: [],
       heatmapDaily: [],
       averageTokens7d: {
@@ -100,6 +107,8 @@ describe("ClaudeCodeDataService", () => {
         uncachedTokens: 0
       }
     });
+    expect(overview.todayCost).toBe(0);
+    expect(overview.cacheSavings.savedCost).toBe(0);
 
     const memory = service.getMemory();
     expect(memory.sourceStatus).toBe("ready");

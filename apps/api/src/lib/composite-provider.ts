@@ -39,6 +39,8 @@ export class CompositeProvider implements MonitorProviderAdapter {
     const [firstProvider, ...restProviders] = this.providers;
     const overview = (firstProvider ?? this.getFirstProvider()).getOverview(tokens);
     overview.stats.todayTokens = tokens.todayTokens;
+    overview.todayCost = tokens.todayCost;
+    overview.cacheSavings = tokens.cacheSavings;
     overview.daily = tokens.daily;
     overview.heatmapDaily = tokens.heatmapDaily;
     overview.averageTokens7d = tokens.averageTokens7d;

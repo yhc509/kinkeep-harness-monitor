@@ -157,6 +157,8 @@ export class ClaudeCodeDataService implements MonitorProviderAdapter {
         totalHooks: settings.hooks.length,
         todayTokens: tokens.todayTokens
       },
+      todayCost: tokens.todayCost,
+      cacheSavings: tokens.cacheSavings,
       daily: tokens.daily,
       heatmapDaily: tokens.heatmapDaily,
       averageTokens7d: tokens.averageTokens7d,

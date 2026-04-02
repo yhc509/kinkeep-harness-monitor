@@ -44,6 +44,8 @@ describe("TokenCollectorService", () => {
     expect(tokens.hourly[0]?.totalTokens).toBe(140);
     expect(tokens.hourly[0]?.uncachedInputTokens).toBe(80);
     expect(tokens.hourly[0]?.requestCount).toBe(1);
+    expect(tokens.daily[0]?.estimatedCost).toBeCloseTo(0.000846, 8);
+    expect(tokens.hourly[0]?.estimatedCost).toBeCloseTo(0.000846, 8);
     expect(tokens.modelUsage).toEqual([
       {
         modelName: "gpt-5.4",
@@ -690,6 +692,7 @@ describe("TokenCollectorService", () => {
       codexTokens: 0,
       claudeCodeTokens: 21135
     });
+    expect(tokens.daily[0]?.estimatedCost).toBeCloseTo(0.2425875, 8);
     expect(tokens.modelUsage).toEqual([
       {
         modelName: "claude-opus-4-6",
@@ -808,7 +811,8 @@ describe("TokenCollectorService", () => {
       uncachedInputTokens: 152_079,
       outputTokens: 0,
       reasoningOutputTokens: 0,
-      requestCount: 0
+      requestCount: 0,
+      estimatedCost: 0.456237
     });
     expect(tokens.modelUsage).toEqual([
       {

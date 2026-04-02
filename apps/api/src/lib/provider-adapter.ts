@@ -1,4 +1,5 @@
 import type {
+  CacheSavings,
   HookDetail,
   IntegrationsResponse,
   MemoryResponse,
@@ -29,6 +30,8 @@ export interface ProjectQueryOptions {
 
 export interface OverviewTokenSnapshot {
   todayTokens: TokenBreakdown;
+  todayCost: number;
+  cacheSavings: CacheSavings;
   daily: DailyTokenPoint[];
   heatmapDaily: DailyTokenPoint[];
   averageTokens7d: TokenBreakdown;

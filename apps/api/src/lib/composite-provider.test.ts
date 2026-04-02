@@ -20,6 +20,13 @@ const OVERVIEW_TOKENS: OverviewTokenSnapshot = {
     cachedInputTokens: 17,
     uncachedTokens: 60
   },
+  todayCost: 0.0042,
+  cacheSavings: {
+    actualCost: 0.0042,
+    projectedCostWithoutCache: 0.0051,
+    savedCost: 0.0009,
+    hitRate: 17 / 55
+  },
   daily: [{
     day: "2026-03-14",
     totalTokens: 77,
@@ -27,7 +34,8 @@ const OVERVIEW_TOKENS: OverviewTokenSnapshot = {
     cachedInputTokens: 17,
     uncachedTokens: 60,
     uncachedInputTokens: 38,
-    outputTokens: 22
+    outputTokens: 22,
+    estimatedCost: 0.0042
   }],
   heatmapDaily: [{
     day: "2026-03-13",
@@ -36,7 +44,8 @@ const OVERVIEW_TOKENS: OverviewTokenSnapshot = {
     cachedInputTokens: 3,
     uncachedTokens: 9,
     uncachedInputTokens: 6,
-    outputTokens: 3
+    outputTokens: 3,
+    estimatedCost: 0.0007
   }],
   averageTokens7d: {
     totalTokens: 11,
@@ -287,6 +296,8 @@ describe("CompositeProvider", () => {
     expect(overview.daily).toEqual(OVERVIEW_TOKENS.daily);
     expect(overview.heatmapDaily).toEqual(OVERVIEW_TOKENS.heatmapDaily);
     expect(overview.averageTokens7d).toEqual(OVERVIEW_TOKENS.averageTokens7d);
+    expect(overview.todayCost).toBe(OVERVIEW_TOKENS.todayCost);
+    expect(overview.cacheSavings).toEqual(OVERVIEW_TOKENS.cacheSavings);
     expect(overview.lastSyncedAt).toBe(OVERVIEW_TOKENS.lastSyncedAt);
 
     expect(memory.entries.map((entry) => entry.threadId)).toEqual(["thread-a", "thread-b"]);
@@ -356,6 +367,8 @@ function createProvider(options: {
           ...baseOverview.stats,
           todayTokens: tokens.todayTokens
         },
+        todayCost: tokens.todayCost,
+        cacheSavings: tokens.cacheSavings,
         daily: tokens.daily,
         heatmapDaily: tokens.heatmapDaily,
         averageTokens7d: tokens.averageTokens7d,
@@ -442,6 +455,13 @@ function createOverview(overrides: Partial<OverviewResponse> = {}): OverviewResp
         cachedInputTokens: 0,
         uncachedTokens: 0
       }
+    },
+    todayCost: 0,
+    cacheSavings: {
+      actualCost: 0,
+      projectedCostWithoutCache: 0,
+      savedCost: 0,
+      hitRate: 0
     },
     daily: [],
     heatmapDaily: [],

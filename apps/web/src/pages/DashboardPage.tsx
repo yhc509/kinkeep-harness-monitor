@@ -6,7 +6,7 @@ import { Panel } from "../components/Panel";
 import { StatStrip } from "../components/StatStrip";
 import { StatusPill } from "../components/StatusPill";
 import { useApiResource } from "../hooks/useApiResource";
-import { formatDateTime, formatNumber } from "../utils/format";
+import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "../utils/format";
 
 export function DashboardPage() {
   const overview = useApiResource(() => getOverview(), {
@@ -14,6 +14,11 @@ export function DashboardPage() {
     cacheKey: apiResourceKeys.overview,
     staleTimeMs: 10_000
   });
+  const cacheSavingsCopy = overview.data
+    ? overview.data.cacheSavings.savedCost >= 0
+      ? `Cache savings: ${formatCurrency(overview.data.cacheSavings.savedCost)} saved (${formatPercent(overview.data.cacheSavings.hitRate)} hit rate)`
+      : `Cache overhead: ${formatCurrency(Math.abs(overview.data.cacheSavings.savedCost))} extra (${formatPercent(overview.data.cacheSavings.hitRate)} hit rate)`
+    : null;
 
   return (
     <div className="page-stack">
@@ -46,7 +51,7 @@ export function DashboardPage() {
                 {
                   label: "Tokens today",
                   value: formatNumber(overview.data.stats.todayTokens.totalTokens),
-                  meta: "Total",
+                  meta: `Estimated ${formatCurrency(overview.data.todayCost)}`,
                   accent: "cool",
                   icon: Flame
                 },
@@ -60,6 +65,7 @@ export function DashboardPage() {
                 }
               ]}
             />
+            {cacheSavingsCopy ? <p className="summary-note">{cacheSavingsCopy}</p> : null}
 
             <Panel
               title="Activity heatmap"

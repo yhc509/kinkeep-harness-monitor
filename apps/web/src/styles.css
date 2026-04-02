@@ -396,6 +396,14 @@ pre {
   align-items: flex-start;
 }
 
+.summary-note {
+  margin: -4px 0 0;
+  padding: 0 2px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .two-column,
 .three-column,
 .dashboard-grid {
@@ -892,6 +900,28 @@ pre {
 
 .model-usage-tooltip p {
   margin: 0;
+}
+
+.chart-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(8, 12, 17, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.chart-tooltip strong {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.chart-tooltip p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.75rem;
 }
 
 .model-usage-empty {
