@@ -6,8 +6,7 @@ import type {
   ProjectSummary,
   SessionDetail,
   SessionListItem,
-  SkillDetail,
-  TokenBreakdown
+  SkillDetail
 } from "@codex-monitor/shared";
 import type { ProviderId } from "../config";
 import type { MonitorProviderAdapter, OverviewTokenSnapshot, ProjectQueryOptions, SessionQueryOptions } from "./provider-adapter";
@@ -39,6 +38,11 @@ export class CompositeProvider implements MonitorProviderAdapter {
   getOverview(tokens: OverviewTokenSnapshot): OverviewResponse {
     const [firstProvider, ...restProviders] = this.providers;
     const overview = (firstProvider ?? this.getFirstProvider()).getOverview(tokens);
+    overview.stats.todayTokens = tokens.todayTokens;
+    overview.daily = tokens.daily;
+    overview.heatmapDaily = tokens.heatmapDaily;
+    overview.averageTokens7d = tokens.averageTokens7d;
+    overview.lastSyncedAt = tokens.lastSyncedAt;
 
     for (const provider of restProviders) {
       const nextOverview = provider.getOverview(tokens);
@@ -47,7 +51,6 @@ export class CompositeProvider implements MonitorProviderAdapter {
       overview.stats.totalSkills += nextOverview.stats.totalSkills;
       overview.stats.totalMcpServers += nextOverview.stats.totalMcpServers;
       overview.stats.totalHooks += nextOverview.stats.totalHooks;
-      overview.stats.todayTokens = sumTokenBreakdown(overview.stats.todayTokens, nextOverview.stats.todayTokens);
     }
 
     return overview;
@@ -236,12 +239,4 @@ function compareSessions(
   const leftValue = sort === "tokensUsed" ? left.tokensUsed : Date.parse(sort === "createdAt" ? left.createdAt : left.updatedAt);
   const rightValue = sort === "tokensUsed" ? right.tokensUsed : Date.parse(sort === "createdAt" ? right.createdAt : right.updatedAt);
   return (leftValue - rightValue) * multiplier;
-}
-
-function sumTokenBreakdown(left: TokenBreakdown, right: TokenBreakdown): TokenBreakdown {
-  return {
-    totalTokens: left.totalTokens + right.totalTokens,
-    cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens,
-    uncachedTokens: left.uncachedTokens + right.uncachedTokens
-  };
 }

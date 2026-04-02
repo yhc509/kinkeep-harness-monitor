@@ -313,7 +313,7 @@ export function TokensPage() {
                     <article key={entry.hourBucket} className="snapshot-row">
                       <div>
                         <strong>{formatDateTime(entry.hourBucket)}</strong>
-                        <p>{formatNumber(entry.requestCount)} requests</p>
+                        <p>{formatNumber(entry.requestCount)} token events</p>
                       </div>
                       <span>{formatNumber(entry.totalTokens)}</span>
                     </article>

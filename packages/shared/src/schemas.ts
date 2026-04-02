@@ -101,6 +101,7 @@ export const hourlyTokenUsageSchema = z.object({
   totalTokens: z.number(),
   inputTokens: z.number(),
   cachedInputTokens: z.number(),
+  uncachedInputTokens: z.number(),
   outputTokens: z.number(),
   reasoningOutputTokens: z.number(),
   requestCount: z.number()

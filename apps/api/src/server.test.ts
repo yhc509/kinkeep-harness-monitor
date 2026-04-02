@@ -139,4 +139,31 @@ describe("API server", () => {
 
     await app.close();
   });
+
+  it("does not double-count overview todayTokens when all providers are active", async () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+    fixture.config.activeProviderIds = ["codex", "claude-code"];
+
+    const app = await buildServer(fixture.config);
+
+    const snapshot = await app.inject({
+      method: "POST",
+      url: "/api/tokens/snapshot"
+    });
+    expect(snapshot.statusCode).toBe(200);
+
+    const overview = await app.inject({
+      method: "GET",
+      url: "/api/overview"
+    });
+    expect(overview.statusCode).toBe(200);
+    expect(overview.json().stats.todayTokens).toEqual({
+      totalTokens: 140,
+      cachedInputTokens: 20,
+      uncachedTokens: 120
+    });
+
+    await app.close();
+  });
 });

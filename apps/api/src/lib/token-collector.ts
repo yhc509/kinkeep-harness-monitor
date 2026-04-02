@@ -21,7 +21,7 @@ import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
 
-const CACHE_PARSE_VERSION = "5";
+const CACHE_PARSE_VERSION = "7";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
 const PROJECT_USAGE_LIMIT = 12;
@@ -33,7 +33,7 @@ const UNKNOWN_MODEL_NAME = "Unknown Model";
 const CLAUDE_CODE_STATS_ROLLOUT_PATH = "__claude-code-stats__";
 const CLAUDE_CODE_STATS_PROJECT_ID = "__claude-code__";
 const CLAUDE_CODE_STATS_PROJECT_NAME = "Claude Code";
-const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v1";
+const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v2";
 const CLAUDE_CODE_STATS_MODEL_PROVIDER = "anthropic";
 const SYNTHETIC_ROLLOUT_PATHS = new Set([CLAUDE_CODE_STATS_ROLLOUT_PATH]);
 
@@ -89,6 +89,7 @@ interface UsageAccumulator {
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
+  uncachedInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
   requestCount: number;
@@ -106,6 +107,7 @@ interface HourlyUsageRow {
   total_tokens: number;
   input_tokens: number;
   cached_input_tokens: number;
+  uncached_input_tokens: number;
   output_tokens: number;
   reasoning_output_tokens: number;
   request_count: number;
@@ -116,6 +118,7 @@ interface DailyUsageRow {
   total_tokens: number;
   input_tokens: number;
   cached_input_tokens: number;
+  uncached_input_tokens: number;
   output_tokens: number;
 }
 
@@ -150,6 +153,10 @@ interface ModelUsageRow {
 interface StatsCacheDailyUsage {
   hourBucket: string;
   totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
   modelUsage: Array<{
     modelName: string;
     totalTokens: number;
@@ -187,6 +194,7 @@ export class TokenCollectorService {
         total_tokens INTEGER NOT NULL,
         input_tokens INTEGER NOT NULL,
         cached_input_tokens INTEGER NOT NULL,
+        uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
         output_tokens INTEGER NOT NULL,
         reasoning_output_tokens INTEGER NOT NULL,
         request_count INTEGER NOT NULL,
@@ -224,6 +232,7 @@ export class TokenCollectorService {
     ensureColumn(database, "rollout_hourly_usage", "project_id", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_name", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_path", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_hourly_usage", "uncached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     database.close();
   }
 
@@ -263,10 +272,11 @@ export class TokenCollectorService {
           total_tokens,
           input_tokens,
           cached_input_tokens,
+          uncached_input_tokens,
           output_tokens,
           reasoning_output_tokens,
           request_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertModelUsage = database.prepare(`
         INSERT OR REPLACE INTO rollout_hourly_model_usage (
@@ -287,9 +297,10 @@ export class TokenCollectorService {
           CLAUDE_CODE_STATS_PROJECT_NAME,
           "",
           entry.totalTokens,
-          0,
-          0,
-          0,
+          entry.inputTokens,
+          entry.cachedInputTokens,
+          entry.uncachedInputTokens,
+          entry.outputTokens,
           0,
           0
         );
@@ -397,6 +408,7 @@ export class TokenCollectorService {
         SUM(total_tokens) AS total_tokens,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
         SUM(output_tokens) AS output_tokens
       FROM rollout_hourly_usage
       WHERE hour_bucket >= ?
@@ -433,6 +445,7 @@ export class TokenCollectorService {
         SUM(total_tokens) AS total_tokens,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
         SUM(request_count) AS request_count
@@ -483,7 +496,7 @@ export class TokenCollectorService {
         inputTokens: row.input_tokens,
         cachedInputTokens: row.cached_input_tokens,
         uncachedTokens: Math.max(0, row.total_tokens - row.cached_input_tokens),
-        uncachedInputTokens: Math.max(0, row.input_tokens - row.cached_input_tokens),
+        uncachedInputTokens: row.uncached_input_tokens,
         outputTokens: row.output_tokens
       });
     }
@@ -673,11 +686,14 @@ export class TokenCollectorService {
     const deletedPaths = indexedRows
       .map((row) => row.rollout_path)
       .filter((rolloutPath) => !currentPaths.has(rolloutPath) && !isSyntheticRolloutPath(rolloutPath));
+    const staleSyntheticPaths = indexedRows
+      .filter((row) => isSyntheticRolloutPath(row.rollout_path) && row.parse_version !== CLAUDE_CODE_STATS_PARSE_VERSION)
+      .map((row) => row.rollout_path);
 
     return {
       totalRollouts: files.length,
       changedFiles,
-      deletedPaths,
+      deletedPaths: [...new Set([...deletedPaths, ...staleSyntheticPaths])],
       hasCache: usageCount.count > 0 || modelUsageCount.count > 0 || indexedRows.length > 0
     };
   }
@@ -721,10 +737,11 @@ export class TokenCollectorService {
             total_tokens,
             input_tokens,
             cached_input_tokens,
+            uncached_input_tokens,
             output_tokens,
             reasoning_output_tokens,
             request_count
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const insertModelUsage = database.prepare(`
           INSERT INTO rollout_hourly_model_usage (
@@ -748,6 +765,7 @@ export class TokenCollectorService {
             usage.totalTokens,
             usage.inputTokens,
             usage.cachedInputTokens,
+            usage.uncachedInputTokens,
             usage.outputTokens,
             usage.reasoningOutputTokens,
             usage.requestCount
@@ -948,7 +966,6 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
       continue;
     }
 
-    tokenEvents += 1;
     const info = isRecord(payload.info) ? payload.info : {};
     const totalUsage = parseUsageBlock(info.total_token_usage);
     const lastUsage = parseUsageBlock(info.last_token_usage);
@@ -969,18 +986,27 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
       continue;
     }
 
+    const nextTotals = mergeUsageState(previousTotals, totalUsage);
+    if (!hasCumulativeUsageProgress(totalUsage, previousTotals)) {
+      previousTotals = nextTotals;
+      continue;
+    }
+
     const delta = resolveUsageDelta(lastUsage, totalUsage, previousTotals);
-    previousTotals = mergeUsageState(previousTotals, totalUsage);
+    previousTotals = nextTotals;
 
     if (delta.totalTokens <= 0) {
       continue;
     }
+
+    tokenEvents += 1;
 
     const hourBucket = formatHourBucket(timestamp);
     const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator();
     accumulator.totalTokens += delta.totalTokens;
     accumulator.inputTokens += delta.inputTokens;
     accumulator.cachedInputTokens += delta.cachedInputTokens;
+    accumulator.uncachedInputTokens += Math.max(0, delta.inputTokens - delta.cachedInputTokens);
     accumulator.outputTokens += delta.outputTokens;
     accumulator.reasoningOutputTokens += delta.reasoningOutputTokens;
     accumulator.requestCount += 1;
@@ -1064,12 +1090,16 @@ function parseClaudeCodeTranscriptUsage(
       continue;
     }
 
-    const inputTokens = readUsageNumber(usage, "input_tokens");
+    const uncachedInputTokens = readUsageNumber(usage, "input_tokens");
     const outputTokens = readUsageNumber(usage, "output_tokens");
     const cacheCreationTokens = readUsageNumber(usage, "cache_creation_input_tokens");
     const cacheReadTokens = readUsageNumber(usage, "cache_read_input_tokens");
-    const cachedInputTokens = cacheCreationTokens + cacheReadTokens;
-    const totalTokens = inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens;
+    // Claude reports uncached input, cache writes, and cache reads separately.
+    // Normalize to the shared schema so inputTokens is total input and
+    // cachedInputTokens only represents cache-hit tokens.
+    const cachedInputTokens = cacheReadTokens;
+    const inputTokens = uncachedInputTokens + cacheCreationTokens + cacheReadTokens;
+    const totalTokens = inputTokens + outputTokens;
 
     if (totalTokens <= 0) {
       continue;
@@ -1082,6 +1112,7 @@ function parseClaudeCodeTranscriptUsage(
     accumulator.totalTokens += totalTokens;
     accumulator.inputTokens += inputTokens;
     accumulator.cachedInputTokens += cachedInputTokens;
+    accumulator.uncachedInputTokens += uncachedInputTokens + cacheCreationTokens;
     accumulator.outputTokens += outputTokens;
     accumulator.requestCount += 1;
     hourlyUsage.set(hourBucket, accumulator);
@@ -1133,7 +1164,15 @@ function resolveUsageDelta(
   };
 }
 
+/**
+ * Assumes Codex CLI total_token_usage cumulative counters are monotonically increasing within a session.
+ * If an individual metric stays flat or decreases, defensively clamp that metric's delta to 0.
+ */
 function resolveMetricDelta(lastValue: number | null, currentTotal: number | null, previousTotal: number | null): number {
+  if (currentTotal !== null && previousTotal !== null && currentTotal <= previousTotal) {
+    return 0;
+  }
+
   if (lastValue !== null) {
     return Math.max(0, lastValue);
   }
@@ -1155,11 +1194,35 @@ function mergeUsageState(previous: ParsedUsageBlock, next: ParsedUsageBlock): Pa
   };
 }
 
+/**
+ * Assumes Codex CLI total_token_usage cumulative counters are monotonically increasing within a session.
+ * Treat a snapshot as progress only when at least one reported cumulative metric increases.
+ */
+function hasCumulativeUsageProgress(totalUsage: ParsedUsageBlock, previousTotals: ParsedUsageBlock): boolean {
+  let hasTotals = false;
+
+  for (const metric of ["totalTokens", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens"] as const) {
+    const nextValue = totalUsage[metric];
+    if (nextValue === null) {
+      continue;
+    }
+
+    hasTotals = true;
+    const previousValue = previousTotals[metric];
+    if (previousValue === null || nextValue > previousValue) {
+      return true;
+    }
+  }
+
+  return !hasTotals;
+}
+
 function createEmptyUsageAccumulator(): UsageAccumulator {
   return {
     totalTokens: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
+    uncachedInputTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
     requestCount: 0
@@ -1196,6 +1259,7 @@ function mapHourlyUsageRow(row: HourlyUsageRow): HourlyTokenUsage {
     totalTokens: row.total_tokens,
     inputTokens: row.input_tokens,
     cachedInputTokens: row.cached_input_tokens,
+    uncachedInputTokens: row.uncached_input_tokens,
     outputTokens: row.output_tokens,
     reasoningOutputTokens: row.reasoning_output_tokens,
     requestCount: row.request_count
@@ -1336,6 +1400,12 @@ function parseStatsCacheDailyUsage(value: unknown): StatsCacheDailyUsage[] {
     dailyUsage.push({
       hourBucket,
       totalTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      // stats-cache exposes per-day totals, but not reliable daily cache-hit/output splits.
+      // Keep synthetic rows non-zero by treating the daily total as estimated uncached input.
+      inputTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      cachedInputTokens: 0,
+      uncachedInputTokens: modelUsage.reduce((sum, item) => sum + item.totalTokens, 0),
+      outputTokens: 0,
       modelUsage
     });
   }

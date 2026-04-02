@@ -186,7 +186,7 @@ export function ProjectBubbleChart({ data }: ProjectBubbleChartProps) {
             {tooltip.item.projectPath ? <p>{tooltip.item.projectPath}</p> : null}
             <span>Total tokens {formatNumber(tooltip.item.totalTokens)}</span>
             <span>Share {formatPercent(tooltip.item.share, 1)}</span>
-            <span>Requests {formatNumber(tooltip.item.requestCount)}</span>
+            <span>Token events {formatNumber(tooltip.item.requestCount)}</span>
           </div>
         ) : null}
       </div>
@@ -212,7 +212,7 @@ export function ProjectBubbleChart({ data }: ProjectBubbleChartProps) {
             <div className="project-bubble-legend-value">
               <strong>{formatNumber(item.totalTokens)}</strong>
               <span>{formatPercent(item.share, 1)}</span>
-              <span>{formatNumber(item.requestCount)} requests</span>
+              <span>{formatNumber(item.requestCount)} token events</span>
             </div>
           </div>
         ))}
