@@ -15,6 +15,11 @@ describe("cmd-normalize", () => {
       expect(extractCodexToolNames("mkdir tmp; cd tmp; ls")).toEqual(["mkdir", "cd", "ls"]);
     });
 
+    it("extracts commands split by shell boolean operators", () => {
+      expect(extractCodexToolNames("cd foo && rg bar")).toEqual(["cd", "rg"]);
+      expect(extractCodexToolNames("cmd1 || cmd2")).toEqual(["cmd1", "cmd2"]);
+    });
+
     it("skips leading env assignments", () => {
       expect(extractCodexToolNames("VAR=1 cmd")).toEqual(["cmd"]);
     });
@@ -25,6 +30,21 @@ describe("cmd-normalize", () => {
 
     it("drops leading command-substitution assignments", () => {
       expect(extractCodexToolNames("tmpdir=$(mktemp); cd $tmpdir")).toEqual(["cd"]);
+      expect(extractCodexToolNames("tmpdir=$(mktemp) && cd \"$tmpdir\"")).toEqual(["cd"]);
+    });
+
+    it("unwraps one shell subshell before extracting commands", () => {
+      expect(extractCodexToolNames("(cd /tmp && ls)")).toEqual(["cd", "ls"]);
+      expect(extractCodexToolNames("(cd /tmp; ls)")).toEqual(["cd", "ls"]);
+    });
+
+    it("ignores heredoc bodies when splitting commands", () => {
+      expect(extractCodexToolNames("cat <<EOF\nrm -rf /\nEOF")).toEqual(["cat"]);
+    });
+
+    it("strips nested quote pairs from command tokens", () => {
+      expect(extractCodexToolNames("'\"git\"' status")).toEqual(["git"]);
+      expect(extractCodexToolNames("\"'rg'\" foo")).toEqual(["rg"]);
     });
   });
 

@@ -35,7 +35,9 @@ const modeOptions: Array<{ value: ToolUsageMode; label: string }> = [
 const TOP_TOOL_LIMIT = 15;
 
 export function ToolUsageChart({ data }: ToolUsageChartProps) {
-  const [mode, setMode] = useState<ToolUsageMode>("claude-code");
+  const defaultMode = useMemo(() => resolveDefaultMode(data), [data]);
+  const [selectedMode, setSelectedMode] = useState<ToolUsageMode | null>(null);
+  const mode = selectedMode ?? defaultMode;
   const chartData = useMemo(() => buildChartRows(data, mode), [data, mode]);
   const chartHeight = Math.max(240, chartData.length * 34 + 46);
 
@@ -48,13 +50,16 @@ export function ToolUsageChart({ data }: ToolUsageChartProps) {
               key={option.value}
               className={option.value === mode ? "segment active" : "segment"}
               aria-pressed={option.value === mode}
-              onClick={() => setMode(option.value)}
+              onClick={() => setSelectedMode(option.value)}
             >
               {option.label}
             </button>
           ))}
         </div>
       </div>
+      <p className="tool-usage-hint">
+        Codex는 명령 단위가 아니라 파이프 segment 단위로 카운트합니다 (예: <code>nl | sed</code>는 nl과 sed 각각 +1).
+      </p>
 
       {chartData.length > 0 ? (
         <div className="tool-usage-scroll">
@@ -113,7 +118,7 @@ function buildChartRows(data: ToolUsageEntry[], mode: ToolUsageMode): ToolUsageC
   const rows: ToolUsageChartRow[] = data
     .filter((entry) => mode === "total" || entry.provider === mode)
     .map((entry) => ({
-      key: `${mode}:${entry.provider}:${entry.toolName}`,
+      key: `${entry.provider}:${entry.toolName}`,
       label: formatToolLabel(entry, mode),
       provider: entry.provider,
       toolName: entry.toolName,
@@ -126,10 +131,11 @@ function buildChartRows(data: ToolUsageEntry[], mode: ToolUsageMode): ToolUsageC
   const hiddenRows = rows.slice(TOP_TOOL_LIMIT);
 
   if (hiddenRows.length > 0) {
+    const otherProvider = resolveOtherProvider(hiddenRows);
     visibleRows.push({
-      key: `${mode}:other`,
+      key: `${otherProvider}:other`,
       label: `기타 ${hiddenRows.length}개`,
-      provider: resolveOtherProvider(hiddenRows),
+      provider: otherProvider,
       toolName: "Other",
       callCount: hiddenRows.reduce((sum, entry) => sum + entry.callCount, 0),
       color: resolveOtherColor(hiddenRows),
@@ -138,6 +144,18 @@ function buildChartRows(data: ToolUsageEntry[], mode: ToolUsageMode): ToolUsageC
   }
 
   return visibleRows;
+}
+
+function resolveDefaultMode(data: ToolUsageEntry[]): ToolUsageMode {
+  if (data.some((entry) => entry.provider === "claude-code" && entry.callCount > 0)) {
+    return "claude-code";
+  }
+
+  if (data.some((entry) => entry.provider === "codex" && entry.callCount > 0)) {
+    return "codex";
+  }
+
+  return "claude-code";
 }
 
 function formatToolLabel(entry: ToolUsageEntry, mode: ToolUsageMode): string {

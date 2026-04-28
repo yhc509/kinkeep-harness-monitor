@@ -343,10 +343,10 @@ export class TokenCollectorService {
         attributed_output_tokens INTEGER,
         PRIMARY KEY (rollout_path, hour_bucket, provider, tool_name)
       );
-      CREATE INDEX IF NOT EXISTS idx_tta_provider_tool
-        ON tool_token_attribution(provider, tool_name);
-      CREATE INDEX IF NOT EXISTS idx_tta_hour_bucket
-        ON tool_token_attribution(hour_bucket);
+      DROP INDEX IF EXISTS idx_tta_provider_tool;
+      DROP INDEX IF EXISTS idx_tta_hour_bucket;
+      CREATE INDEX IF NOT EXISTS idx_tta_provider_hour_tool
+        ON tool_token_attribution(provider, hour_bucket, tool_name);
 
       CREATE TABLE IF NOT EXISTS collector_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1079,7 +1079,11 @@ export class TokenCollectorService {
     for (const file of files) {
       currentPaths.add(file.rolloutPath);
       const previous = indexedMap.get(file.rolloutPath);
-      if (previous && previous.parse_version !== ROLLOUT_PARSE_VERSION) {
+      if (
+        previous
+        && previous.parse_version !== ROLLOUT_PARSE_VERSION
+        && !isSyntheticRolloutPath(previous.rollout_path)
+      ) {
         truncateToolUsage = true;
       }
       if (

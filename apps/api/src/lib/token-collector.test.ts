@@ -893,6 +893,62 @@ describe("TokenCollectorService", () => {
     expect(tokens.toolUsage).toEqual(collector.getToolUsage(1, new Date("2026-03-18T10:05:00+09:00")));
   });
 
+  it("preserves tool usage when unchanged rollouts coexist with stats-cache rows", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    const statsCachePath = path.join(fixture.claudeHome, "stats-cache.json");
+
+    writeStatsCache(statsCachePath, {
+      version: 2,
+      lastComputedDate: "2026-03-18",
+      dailyModelTokens: [
+        {
+          date: "2026-03-18",
+          tokensByModel: {
+            "claude-opus-4-6": 42
+          }
+        }
+      ],
+      modelUsage: {}
+    });
+
+    collector.importStatsCacheUsage(statsCachePath);
+    collector.captureSnapshot(new Date("2026-03-18T10:05:00+09:00"));
+
+    const firstRows = readToolAttributionRows(fixture.config.monitorDbPath);
+    expect(firstRows).toEqual([
+      {
+        rollout_path: fixture.primaryRolloutPath,
+        provider: "claude-code",
+        tool_name: "Bash",
+        call_count: 1
+      }
+    ]);
+    expect(collector.getToolUsage(1, new Date("2026-03-18T10:05:00+09:00"))).toEqual([
+      {
+        provider: "claude-code",
+        toolName: "Bash",
+        callCount: 1
+      }
+    ]);
+
+    const indexDatabase = new DatabaseSync(fixture.config.monitorDbPath);
+    const statsIndex = indexDatabase.prepare(`
+      SELECT parse_version
+      FROM rollout_index_state
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { parse_version: string } | undefined;
+    indexDatabase.close();
+    expect(statsIndex?.parse_version).toBe("claude-stats-v4");
+
+    collector.captureSnapshot(new Date("2026-03-18T10:06:00+09:00"));
+
+    expect(readToolAttributionRows(fixture.config.monitorDbPath)).toEqual(firstRows);
+  });
+
   it("truncates and rebuilds tool usage when the tool parse version changes", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
@@ -1755,6 +1811,32 @@ function insertHourlyUsage(
     0,
     input.requestCount ?? 1
   );
+}
+
+function readToolAttributionRows(monitorDbPath: string): Array<{
+  rollout_path: string;
+  provider: string;
+  tool_name: string;
+  call_count: number;
+}> {
+  const database = new DatabaseSync(monitorDbPath);
+  const rows = database.prepare(`
+    SELECT
+      rollout_path,
+      provider,
+      tool_name,
+      SUM(call_count) AS call_count
+    FROM tool_token_attribution
+    GROUP BY rollout_path, provider, tool_name
+    ORDER BY rollout_path, provider, tool_name
+  `).all() as Array<{
+    rollout_path: string;
+    provider: string;
+    tool_name: string;
+    call_count: number;
+  }>;
+  database.close();
+  return rows;
 }
 
 function insertThreadRow(

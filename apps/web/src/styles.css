@@ -655,6 +655,19 @@ pre {
   margin-bottom: 10px;
 }
 
+.tool-usage-hint {
+  margin: -2px 0 10px;
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.tool-usage-hint code {
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
 .tool-usage-scroll {
   width: 100%;
   max-width: 100%;

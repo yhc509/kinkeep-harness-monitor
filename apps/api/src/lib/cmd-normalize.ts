@@ -4,8 +4,8 @@ const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const CLAUDE_MCP_PATTERN = /^mcp__([^_]+(?:_[^_]+)*?)__/;
 
 export function extractCodexToolNames(cmd: string): string[] {
-  return cmd
-    .split(/[|;]/)
+  return stripHeredocBody(unwrapSubshell(cmd))
+    .split(/[|;]|&&|\|\|/)
     .flatMap((segment) => {
       const toolName = extractCodexSegmentToolName(segment);
       return toolName ? [toolName] : [];
@@ -52,5 +52,32 @@ function extractCodexSegmentToolName(segment: string): string | null {
 }
 
 function stripTokenQuotes(token: string): string {
-  return token.replace(/^['"]|['"]$/g, "");
+  let stripped = token;
+  while (
+    stripped.length >= 2
+    && isQuote(stripped[0]!)
+    && isQuote(stripped[stripped.length - 1]!)
+  ) {
+    stripped = stripped.slice(1, -1);
+  }
+  return stripped;
+}
+
+function isQuote(value: string): boolean {
+  return value === "'" || value === "\"";
+}
+
+function unwrapSubshell(cmd: string): string {
+  const trimmed = cmd.trim();
+  const firstToken = trimmed.split(/\s+/, 1)[0] ?? "";
+  if (!firstToken.startsWith("(") || !trimmed.endsWith(")")) {
+    return trimmed;
+  }
+
+  return trimmed.slice(1, -1).trim();
+}
+
+function stripHeredocBody(cmd: string): string {
+  const heredocIndex = cmd.search(/<<-?/);
+  return heredocIndex >= 0 ? cmd.slice(0, heredocIndex) : cmd;
 }
