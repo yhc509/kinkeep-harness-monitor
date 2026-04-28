@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeCodeDataService } from "./claude-code-service";
 import { CodexDataService } from "./codex-service";
 import { TokenCollectorService } from "./token-collector";
@@ -11,6 +11,8 @@ import { createTestFixture } from "../test-support/fixture";
 const fixtures: Array<{ cleanup: () => void }> = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
+
   while (fixtures.length > 0) {
     fixtures.pop()?.cleanup();
   }
@@ -818,6 +820,81 @@ describe("TokenCollectorService", () => {
       bucketMax: 30,
       count: 1
     });
+  });
+
+  it("uses floored session minutes for duration bucket boundaries", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    writeTokenTimeline(fixture.rolloutPath, [
+      ["2026-03-14T09:00:00+09:00", 10],
+      ["2026-03-14T09:29:59+09:00", 20],
+      ["2026-03-14T10:00:00+09:00", 30],
+      ["2026-03-14T10:15:00+09:00", 40],
+      ["2026-03-14T10:30:00+09:00", 50],
+      ["2026-03-14T11:00:00+09:00", 60],
+      ["2026-03-14T11:20:00+09:00", 70],
+      ["2026-03-14T11:40:00+09:00", 80],
+      ["2026-03-14T12:00:00+09:00", 90]
+    ]);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
+    expect(tokens.patterns.sessionDuration.durationBuckets.find((bucket) => bucket.bucketMin === 0)).toMatchObject({
+      bucketMin: 0,
+      bucketMax: 30,
+      count: 1
+    });
+    expect(tokens.patterns.sessionDuration.durationBuckets.find((bucket) => bucket.bucketMin === 30)).toMatchObject({
+      bucketMin: 30,
+      bucketMax: 60,
+      count: 1
+    });
+    expect(tokens.patterns.sessionDuration.durationBuckets.find((bucket) => bucket.bucketMin === 60)).toMatchObject({
+      bucketMin: 60,
+      bucketMax: 120,
+      count: 1
+    });
+  });
+
+  it("skips unreadable rollout paths when building patterns", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const originalReadFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: fs.PathOrFileDescriptor, options?: unknown) => {
+      if (filePath === fixture.rolloutPath) {
+        throw Object.assign(new Error("EACCES: permission denied, open"), { code: "EACCES" });
+      }
+
+      return originalReadFileSync(filePath, options as never);
+    }) as typeof fs.readFileSync);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const patterns = collector.getPatterns(1, new Date("2026-03-14T20:00:00+09:00"));
+
+    expect(patterns.dowHourHeatmap).toEqual([
+      {
+        dow: 6,
+        hour: 19,
+        totalTokens: 140,
+        requestCount: 1
+      }
+    ]);
+    expect(patterns.sessionDuration).toEqual({
+      startHistogram: [],
+      durationBuckets: []
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(`[token-collector] Skipping rollout file ${fixture.rolloutPath}: EACCES`);
   });
 
   it("computes pattern hours from naked-local hour buckets without SQLite strftime", () => {

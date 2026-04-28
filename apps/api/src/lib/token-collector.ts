@@ -1277,7 +1277,9 @@ function parseRolloutLineSessions(rolloutPath: string): RolloutSession[] {
   try {
     text = fs.readFileSync(rolloutPath, "utf8");
   } catch (error) {
-    if (isFileMissingError(error)) {
+    const errorCode = getFileErrorCode(error);
+    if (errorCode) {
+      console.warn(`[token-collector] Skipping rollout file ${rolloutPath}: ${errorCode}`);
       return [];
     }
 
@@ -1348,7 +1350,7 @@ function buildSessionDurationPatterns(sessions: RolloutSession[]): TokenPatterns
 
     const durationMinutes = Math.max(
       0,
-      Math.round((session.endMs - session.startMs) / 60_000)
+      Math.floor((session.endMs - session.startMs) / 60_000)
     );
     const bucket = durationBuckets.find((candidate, index) => (
       durationMinutes >= candidate.bucketMin
@@ -2327,11 +2329,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isFileMissingError(error: unknown): error is NodeJS.ErrnoException {
+  return getFileErrorCode(error) === "ENOENT";
+}
+
+function getFileErrorCode(error: unknown): string | null {
   if (!error || typeof error !== "object") {
-    return false;
+    return null;
   }
 
-  return "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+  const code = "code" in error ? (error as NodeJS.ErrnoException).code : null;
+  return typeof code === "string" && code.length > 0 ? code : null;
 }
 
 function scanRolloutFiles(baseDir: string): RolloutFileState[] {
