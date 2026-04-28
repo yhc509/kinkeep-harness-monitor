@@ -4,8 +4,7 @@ const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const CLAUDE_MCP_PATTERN = /^mcp__([^_]+(?:_[^_]+)*?)__/;
 
 export function extractCodexToolNames(cmd: string): string[] {
-  return stripHeredocBody(unwrapSubshell(cmd))
-    .split(/[|;]|&&|\|\|/)
+  return splitOutsideQuotes(stripHeredocBody(unwrapSubshell(cmd)))
     .flatMap((segment) => {
       const toolName = extractCodexSegmentToolName(segment);
       return toolName ? [toolName] : [];
@@ -41,6 +40,8 @@ function extractCodexSegmentToolName(segment: string): string | null {
   const token = stripTokenQuotes(tokens[tokenIndex]!);
   if (
     !token
+    || token.includes("'")
+    || token.includes("\"")
     || DROP_SEGMENT_KEYWORDS.has(token)
     || token.startsWith("$")
     || token.startsWith("(")
@@ -51,19 +52,81 @@ function extractCodexSegmentToolName(segment: string): string | null {
   return token;
 }
 
+function splitOutsideQuotes(s: string): string[] {
+  const segments: string[] = [];
+  let segment = "";
+  let quote: "'" | "\"" | null = null;
+  let escaped = false;
+
+  const pushSegment = () => {
+    const trimmed = segment.trim();
+    if (trimmed) {
+      segments.push(trimmed);
+    }
+    segment = "";
+  };
+
+  for (let index = 0; index < s.length; index += 1) {
+    const char = s[index]!;
+    const nextChar = s[index + 1];
+
+    if (quote !== "'" && char === "\\" && !escaped) {
+      escaped = true;
+      segment += char;
+      continue;
+    }
+
+    if (escaped) {
+      escaped = false;
+      segment += char;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      }
+      segment += char;
+      continue;
+    }
+
+    if (isQuote(char)) {
+      quote = char;
+      segment += char;
+      continue;
+    }
+
+    if ((char === "|" && nextChar === "|") || (char === "&" && nextChar === "&")) {
+      pushSegment();
+      index += 1;
+      continue;
+    }
+
+    if (char === "|" || char === ";") {
+      pushSegment();
+      continue;
+    }
+
+    segment += char;
+  }
+
+  pushSegment();
+  return segments;
+}
+
 function stripTokenQuotes(token: string): string {
   let stripped = token;
   while (
     stripped.length >= 2
     && isQuote(stripped[0]!)
-    && isQuote(stripped[stripped.length - 1]!)
+    && stripped[0] === stripped[stripped.length - 1]
   ) {
     stripped = stripped.slice(1, -1);
   }
   return stripped;
 }
 
-function isQuote(value: string): boolean {
+function isQuote(value: string): value is "'" | "\"" {
   return value === "'" || value === "\"";
 }
 

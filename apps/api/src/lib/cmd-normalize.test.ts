@@ -20,6 +20,18 @@ describe("cmd-normalize", () => {
       expect(extractCodexToolNames("cmd1 || cmd2")).toEqual(["cmd1", "cmd2"]);
     });
 
+    it("ignores command separators inside quoted arguments", () => {
+      expect(extractCodexToolNames("rg 'foo|bar' README.md")).toEqual(["rg"]);
+      expect(extractCodexToolNames('python -c "print(1);print(2)"')).toEqual(["python"]);
+      expect(extractCodexToolNames('python -c "print(\\"a;b\\")"')).toEqual(["python"]);
+      expect(extractCodexToolNames("awk '/foo|bar/' file.txt")).toEqual(["awk"]);
+      expect(extractCodexToolNames("sh -c 'cd foo && rg bar'")).toEqual(["sh"]);
+    });
+
+    it("drops command tokens with unbalanced quotes", () => {
+      expect(extractCodexToolNames("echo ok | bar' baz")).toEqual(["echo"]);
+    });
+
     it("skips leading env assignments", () => {
       expect(extractCodexToolNames("VAR=1 cmd")).toEqual(["cmd"]);
     });
