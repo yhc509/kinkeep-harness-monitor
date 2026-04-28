@@ -644,6 +644,60 @@ pre {
   font-size: 0.9rem;
 }
 
+.tool-usage {
+  min-width: 0;
+}
+
+.tool-usage-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tool-usage-hint {
+  margin: -2px 0 10px;
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.tool-usage-hint code {
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+.tool-usage-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.tool-usage-canvas {
+  min-width: 760px;
+}
+
+.tool-usage-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  border: 1px dashed rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-soft);
+  text-align: center;
+}
+
+.tool-usage-empty strong {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
 .icon-button {
   justify-content: center;
   width: 34px;
@@ -2705,6 +2759,14 @@ pre {
 
   .usage-chart-canvas.compact-canvas {
     min-width: 380px;
+  }
+
+  .tool-usage-toolbar {
+    justify-content: flex-start;
+  }
+
+  .tool-usage-canvas {
+    min-width: 680px;
   }
 
   .modal-backdrop {

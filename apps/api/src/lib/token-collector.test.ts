@@ -759,6 +759,265 @@ describe("TokenCollectorService", () => {
     });
   });
 
+  it("indexes Codex and Claude Code tool usage from rollout fixtures", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex, claude]);
+
+    fs.writeFileSync(
+      fixture.rolloutPath,
+      [
+        {
+          timestamp: "2026-03-18T01:00:00+09:00",
+          type: "session_meta",
+          payload: {
+            cwd: path.join(fixture.rootDir, "workspace", "demo-project", "packages", "client"),
+            model_provider: "openai"
+          }
+        },
+        {
+          timestamp: "2026-03-18T01:00:01+09:00",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: JSON.stringify({ cmd: "nl file | sed -n '1,10p'" }),
+            call_id: "call-exec-1"
+          }
+        },
+        {
+          timestamp: "2026-03-18T01:00:02+09:00",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "write_stdin",
+            arguments: JSON.stringify({ session_id: 1, chars: "ignored" }),
+            call_id: "call-stdin-1"
+          }
+        },
+        {
+          timestamp: "2026-03-18T01:00:03+09:00",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "mcp__obsidian__read_file",
+            arguments: JSON.stringify({ path: "ignored" }),
+            call_id: "call-mcp-1"
+          }
+        },
+        {
+          timestamp: "2026-03-18T01:00:04+09:00",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                total_tokens: 25
+              },
+              last_token_usage: {
+                total_tokens: 25
+              }
+            }
+          }
+        }
+      ].map((line) => JSON.stringify(line)).join("\n"),
+      "utf8"
+    );
+
+    const claudeProjectDir = path.join(fixture.config.providers.claudeCode.home, "projects", "tool-project");
+    fs.mkdirSync(claudeProjectDir, { recursive: true });
+    fs.writeFileSync(path.join(claudeProjectDir, "session-tools.jsonl"), [
+      {
+        type: "assistant",
+        timestamp: "2026-03-18T01:01:00+09:00",
+        message: {
+          role: "assistant",
+          model: "claude-opus-4-6",
+          usage: {
+            input_tokens: 3,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            output_tokens: 2
+          },
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_read",
+              name: "Read",
+              input: {
+                file_path: "README.md"
+              }
+            },
+            {
+              type: "tool_use",
+              id: "toolu_mcp",
+              name: "mcp__obsidian__read_file",
+              input: {
+                path: "note.md"
+              }
+            }
+          ]
+        }
+      }
+    ].map((line) => JSON.stringify(line)).join("\n"), "utf8");
+
+    collector.captureSnapshot(new Date("2026-03-18T10:05:00+09:00"));
+
+    expect(collector.getToolUsage(1, new Date("2026-03-18T10:05:00+09:00"))).toEqual([
+      {
+        provider: "claude-code",
+        toolName: "Read",
+        callCount: 1
+      },
+      {
+        provider: "claude-code",
+        toolName: "mcp:obsidian",
+        callCount: 1
+      },
+      {
+        provider: "codex",
+        toolName: "nl",
+        callCount: 1
+      },
+      {
+        provider: "codex",
+        toolName: "sed",
+        callCount: 1
+      }
+    ]);
+
+    const tokens = collector.getTokens(1, new Date("2026-03-18T10:05:00+09:00"));
+    expect(tokens.toolUsage).toEqual(collector.getToolUsage(1, new Date("2026-03-18T10:05:00+09:00")));
+  });
+
+  it("preserves tool usage when unchanged rollouts coexist with stats-cache rows", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    const statsCachePath = path.join(fixture.claudeHome, "stats-cache.json");
+
+    writeStatsCache(statsCachePath, {
+      version: 2,
+      lastComputedDate: "2026-03-18",
+      dailyModelTokens: [
+        {
+          date: "2026-03-18",
+          tokensByModel: {
+            "claude-opus-4-6": 42
+          }
+        }
+      ],
+      modelUsage: {}
+    });
+
+    collector.importStatsCacheUsage(statsCachePath);
+    collector.captureSnapshot(new Date("2026-03-18T10:05:00+09:00"));
+
+    const firstRows = readToolAttributionRows(fixture.config.monitorDbPath);
+    expect(firstRows).toEqual([
+      {
+        rollout_path: fixture.primaryRolloutPath,
+        provider: "claude-code",
+        tool_name: "Bash",
+        call_count: 1
+      }
+    ]);
+    expect(collector.getToolUsage(1, new Date("2026-03-18T10:05:00+09:00"))).toEqual([
+      {
+        provider: "claude-code",
+        toolName: "Bash",
+        callCount: 1
+      }
+    ]);
+
+    const indexDatabase = new DatabaseSync(fixture.config.monitorDbPath);
+    const statsIndex = indexDatabase.prepare(`
+      SELECT parse_version
+      FROM rollout_index_state
+      WHERE rollout_path = '__claude-code-stats__'
+    `).get() as { parse_version: string } | undefined;
+    indexDatabase.close();
+    expect(statsIndex?.parse_version).toBe("claude-stats-v4");
+
+    collector.captureSnapshot(new Date("2026-03-18T10:06:00+09:00"));
+
+    expect(readToolAttributionRows(fixture.config.monitorDbPath)).toEqual(firstRows);
+  });
+
+  it("truncates and rebuilds tool usage when the tool parse version changes", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    fs.writeFileSync(
+      fixture.rolloutPath,
+      [
+        {
+          timestamp: "2026-03-14T10:00:00+09:00",
+          type: "session_meta",
+          payload: {
+            cwd: path.join(fixture.rootDir, "workspace", "demo-project", "packages", "client"),
+            model_provider: "openai"
+          }
+        },
+        {
+          timestamp: "2026-03-14T10:00:01+09:00",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: JSON.stringify({ cmd: "rg toolUsage" }),
+            call_id: "call-exec-1"
+          }
+        }
+      ].map((line) => JSON.stringify(line)).join("\n"),
+      "utf8"
+    );
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    database.prepare(`
+      INSERT INTO tool_token_attribution (
+        rollout_path,
+        hour_bucket,
+        provider,
+        tool_name,
+        call_count
+      ) VALUES (?, ?, ?, ?, ?)
+    `).run(
+      "/stale/tool-rollout.jsonl",
+      "2026-03-14T10:00:00",
+      "codex",
+      "stale-tool",
+      99
+    );
+    database.prepare(`
+      UPDATE rollout_index_state
+      SET parse_version = ?
+      WHERE rollout_path != ?
+    `).run("9:tool-0", "__claude-code-stats__");
+    database.close();
+
+    collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:01:00+09:00"));
+    expect(tokens.toolUsage).toEqual([
+      {
+        provider: "codex",
+        toolName: "rg",
+        callCount: 1
+      }
+    ]);
+  });
+
   it("builds session duration buckets from rollout line timestamps split by 30-minute gaps", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
@@ -1552,6 +1811,32 @@ function insertHourlyUsage(
     0,
     input.requestCount ?? 1
   );
+}
+
+function readToolAttributionRows(monitorDbPath: string): Array<{
+  rollout_path: string;
+  provider: string;
+  tool_name: string;
+  call_count: number;
+}> {
+  const database = new DatabaseSync(monitorDbPath);
+  const rows = database.prepare(`
+    SELECT
+      rollout_path,
+      provider,
+      tool_name,
+      SUM(call_count) AS call_count
+    FROM tool_token_attribution
+    GROUP BY rollout_path, provider, tool_name
+    ORDER BY rollout_path, provider, tool_name
+  `).all() as Array<{
+    rollout_path: string;
+    provider: string;
+    tool_name: string;
+    call_count: number;
+  }>;
+  database.close();
+  return rows;
 }
 
 function insertThreadRow(

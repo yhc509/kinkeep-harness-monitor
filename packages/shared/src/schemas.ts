@@ -162,6 +162,12 @@ export const modelTokenUsageItemSchema = z.object({
   totalTokens: z.number()
 });
 
+export const toolUsageEntrySchema = z.object({
+  provider: z.enum(["claude-code", "codex"]),
+  toolName: z.string(),
+  callCount: z.number()
+});
+
 export const tokenPatternsSchema = z.object({
   dowHourHeatmap: z.array(z.object({
     dow: z.number().int().min(0).max(6),
@@ -300,6 +306,7 @@ export const tokensResponseSchema = z.object({
   hourly: z.array(hourlyTokenUsageSchema),
   modelUsage: z.array(modelTokenUsageItemSchema),
   patterns: tokenPatternsSchema,
+  toolUsage: z.array(toolUsageEntrySchema),
   collectorRuns: z.array(collectorRunSchema),
   lastSyncedAt: z.string().nullable()
 });
@@ -336,6 +343,7 @@ export type TokenSyncStats = z.infer<typeof tokenSyncStatsSchema>;
 export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;
 export type ProjectTokenUsageItem = z.infer<typeof projectTokenUsageItemSchema>;
 export type ModelTokenUsageItem = z.infer<typeof modelTokenUsageItemSchema>;
+export type ToolUsageEntry = z.infer<typeof toolUsageEntrySchema>;
 export type TokenPatterns = z.infer<typeof tokenPatternsSchema>;
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
