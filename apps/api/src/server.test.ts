@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { tokensResponseSchema } from "@codex-monitor/shared";
 import { buildServer } from "./server";
 import { createTestFixture } from "./test-support/fixture";
 
@@ -94,10 +95,12 @@ describe("API server", () => {
       url: "/api/tokens?range=7"
     });
     expect(tokens.statusCode).toBe(200);
-    expect(tokens.json().daily.some((entry: { totalTokens: number }) => entry.totalTokens === 140)).toBe(true);
-    expect(tokens.json().dailyProviderTokens).toBeDefined();
-    expect(tokens.json().dailyProviderTokens.some((entry: { codexTokens: number }) => entry.codexTokens === 140)).toBe(true);
-    expect(tokens.json().patterns.dowHourHeatmap).toEqual([
+    const tokensJson = tokensResponseSchema.parse(tokens.json());
+    expect(tokensJson.daily.some((entry) => entry.totalTokens === 140)).toBe(true);
+    expect(tokensJson.dailyProviderTokens).toBeDefined();
+    expect(tokensJson.dailyProviderTokens.some((entry) => entry.codexTokens === 140)).toBe(true);
+    expect(tokensJson.toolUsage).toEqual([]);
+    expect(tokensJson.patterns.dowHourHeatmap).toEqual([
       {
         dow: 6,
         hour: 19,
@@ -105,7 +108,7 @@ describe("API server", () => {
         requestCount: 1
       }
     ]);
-    expect(tokens.json().patterns.hourOfDayAverages).toEqual([
+    expect(tokensJson.patterns.hourOfDayAverages).toEqual([
       {
         hour: 19,
         avgTokens: 140,
@@ -113,24 +116,24 @@ describe("API server", () => {
         sampleDays: 1
       }
     ]);
-    expect(tokens.json().patterns.hourOfDayCacheHit).toHaveLength(1);
-    expect(tokens.json().patterns.hourOfDayCacheHit[0]).toMatchObject({
+    expect(tokensJson.patterns.hourOfDayCacheHit).toHaveLength(1);
+    expect(tokensJson.patterns.hourOfDayCacheHit[0]).toMatchObject({
       hour: 19,
       sampleRequests: 1
     });
-    expect(tokens.json().patterns.hourOfDayCacheHit[0].hitRate).toBeCloseTo(0.2, 6);
-    expect(tokens.json().patterns.sessionDuration.startHistogram).toEqual([
+    expect(tokensJson.patterns.hourOfDayCacheHit[0].hitRate).toBeCloseTo(0.2, 6);
+    expect(tokensJson.patterns.sessionDuration.startHistogram).toEqual([
       {
         hour: 19,
         count: 1
       }
     ]);
-    expect(tokens.json().patterns.sessionDuration.durationBuckets[0]).toEqual({
+    expect(tokensJson.patterns.sessionDuration.durationBuckets[0]).toEqual({
       bucketMin: 0,
       bucketMax: 30,
       count: 1
     });
-    expect(tokens.json().modelUsage).toEqual([
+    expect(tokensJson.modelUsage).toEqual([
       {
         modelName: "gpt-5.4",
         modelProvider: "openai",
@@ -185,6 +188,7 @@ describe("API server", () => {
     database.exec(`
       DELETE FROM rollout_hourly_model_usage;
       DELETE FROM rollout_hourly_usage;
+      DELETE FROM tool_token_attribution;
     `);
     database.close();
 
@@ -201,6 +205,7 @@ describe("API server", () => {
     });
     expect(tokens.json().daily.every((entry: { totalTokens: number }) => entry.totalTokens === 0)).toBe(true);
     expect(tokens.json().hourly).toEqual([]);
+    expect(tokens.json().toolUsage).toEqual([]);
     expect(tokens.json().patterns).toEqual({
       dowHourHeatmap: [],
       hourOfDayAverages: [],

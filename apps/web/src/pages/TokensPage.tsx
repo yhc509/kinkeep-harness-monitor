@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { TokenPeriodUnit } from "@codex-monitor/shared";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw, Wrench } from "lucide-react";
 import { apiResourceKeys, createSnapshot, getProjectTokenUsage, getTokens } from "../api";
 import { ActivityHeatmap } from "../components/ActivityHeatmap";
 import { AsyncPane } from "../components/AsyncPane";
@@ -13,6 +13,7 @@ import { ProjectBubbleChart } from "../components/ProjectBubbleChart";
 import { SessionDurationChart } from "../components/SessionDurationChart";
 import { StatStrip } from "../components/StatStrip";
 import { StatusPill } from "../components/StatusPill";
+import { ToolUsageChart } from "../components/ToolUsageChart";
 import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
 import { formatCurrency, formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
 
@@ -327,6 +328,14 @@ export function TokensPage() {
                   <SessionDurationChart data={tokens.data.patterns.sessionDuration} />
                 </div>
               </div>
+            </Panel>
+
+            <Panel
+              title="툴 사용 빈도"
+              subtitle={`${range}-day calls`}
+              icon={<Wrench size={16} strokeWidth={2.2} />}
+            >
+              <ToolUsageChart data={tokens.data.toolUsage} />
             </Panel>
 
             <div className="fold-list">

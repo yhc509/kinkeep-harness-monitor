@@ -10,6 +10,7 @@ import type {
   ProjectTokenUsageItem,
   ProjectTokenUsageResponse,
   TokenBreakdown,
+  ToolUsageEntry,
   TokenPatterns,
   TokenPeriodUnit,
   TokenSyncResult,
@@ -34,11 +35,14 @@ import {
   startOfLocalHour,
   toLocalDateTime
 } from "./format";
+import { extractClaudeToolName, extractCodexToolNames } from "./cmd-normalize";
 import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
 
 const CACHE_PARSE_VERSION = "9";
+const TOOL_PARSE_VERSION = 1;
+const ROLLOUT_PARSE_VERSION = `${CACHE_PARSE_VERSION}:tool-${TOOL_PARSE_VERSION}`;
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
 const PROJECT_USAGE_LIMIT = 12;
@@ -94,6 +98,7 @@ interface SyncPreparation {
   totalRollouts: number;
   changedFiles: RolloutFileState[];
   deletedPaths: string[];
+  truncateToolUsage: boolean;
   hasCache: boolean;
 }
 
@@ -128,6 +133,7 @@ interface ParsedRolloutUsage {
   project: ResolvedProjectInfo | null;
   hourlyUsage: Map<string, UsageAccumulator>;
   hourlyModelUsage: Map<string, ModelUsageAccumulator>;
+  hourlyToolUsage: Map<string, ToolUsageAccumulator>;
   tokenEvents: number;
 }
 
@@ -185,6 +191,19 @@ interface ModelUsageRow {
   model_name: string;
   model_provider: string | null;
   total_tokens: number;
+}
+
+interface ToolUsageAccumulator {
+  hourBucket: string;
+  provider: ToolUsageEntry["provider"];
+  toolName: string;
+  callCount: number;
+}
+
+interface ToolUsageRow {
+  provider: ToolUsageEntry["provider"];
+  tool_name: string;
+  call_count: number;
 }
 
 interface HourlyPatternUsageRow {
@@ -313,6 +332,21 @@ export class TokenCollectorService {
         indexed_at TEXT NOT NULL,
         parse_version TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS tool_token_attribution (
+        rollout_path TEXT NOT NULL,
+        hour_bucket TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        call_count INTEGER NOT NULL DEFAULT 0,
+        attributed_input_tokens INTEGER,
+        attributed_output_tokens INTEGER,
+        PRIMARY KEY (rollout_path, hour_bucket, provider, tool_name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tta_provider_tool
+        ON tool_token_attribution(provider, tool_name);
+      CREATE INDEX IF NOT EXISTS idx_tta_hour_bucket
+        ON tool_token_attribution(hour_bucket);
 
       CREATE TABLE IF NOT EXISTS collector_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -530,6 +564,7 @@ export class TokenCollectorService {
     let runRows: CollectorRunRow[] = [];
     let modelRows: ModelUsageRow[] = [];
     let groupedModelUsageRows: GroupedModelUsageRow[] = [];
+    let toolUsage: ToolUsageEntry[] = [];
     let lastSyncedRow: { finished_at: string } | undefined;
     let patterns: TokenPatterns;
 
@@ -630,6 +665,8 @@ export class TokenCollectorService {
         ORDER BY bucket_key ASC, model_name ASC
       `).all(costStartHourBucket) as unknown as GroupedModelUsageRow[];
 
+      toolUsage = this.getToolUsageFromDatabase(database, rangeDays, now);
+
       lastSyncedRow = database.prepare(`
         SELECT finished_at
         FROM collector_runs
@@ -719,9 +756,32 @@ export class TokenCollectorService {
       hourly,
       modelUsage,
       patterns,
+      toolUsage,
       collectorRuns: runRows.map(mapCollectorRunRow),
       lastSyncedAt: lastSyncedRow?.finished_at ?? null
     });
+  }
+
+  getToolUsage(rangeDays: number, now = new Date()): ToolUsageEntry[] {
+    this.ensureSchema();
+    const database = this.openMonitorDb();
+
+    try {
+      database.exec("BEGIN");
+      const toolUsage = this.getToolUsageFromDatabase(database, rangeDays, now);
+      database.exec("COMMIT");
+      return toolUsage;
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Ignore rollback failures so we can still surface the original error.
+      }
+
+      throw error;
+    } finally {
+      database.close();
+    }
   }
 
   getPatterns(rangeDays: number, now = new Date()): TokenPatterns {
@@ -744,6 +804,29 @@ export class TokenCollectorService {
     } finally {
       database.close();
     }
+  }
+
+  private getToolUsageFromDatabase(database: DatabaseSync, rangeDays: number, now: Date): ToolUsageEntry[] {
+    const startDate = startOfLocalDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (rangeDays - 1)));
+    const startHourBucket = formatHourBucket(startDate);
+    const providers: ToolUsageEntry["provider"][] = ["claude-code", "codex"];
+
+    return providers.flatMap((provider) => {
+      const rows = database.prepare(`
+        SELECT
+          provider,
+          tool_name,
+          SUM(call_count) AS call_count
+        FROM tool_token_attribution
+        WHERE provider = ?
+          AND hour_bucket >= ?
+        GROUP BY provider, tool_name
+        ORDER BY call_count DESC, tool_name ASC
+        LIMIT 50
+      `).all(provider, startHourBucket) as unknown as ToolUsageRow[];
+
+      return rows.map(mapToolUsageRow);
+    });
   }
 
   private getPatternsFromDatabase(database: DatabaseSync, rangeDays: number, now: Date): TokenPatterns {
@@ -953,7 +1036,7 @@ export class TokenCollectorService {
       CLAUDE_CODE_STATS_ROLLOUT_PATH,
       CLAUDE_CODE_STATS_PARSE_VERSION,
       CLAUDE_CODE_STATS_ROLLOUT_PATH,
-      CACHE_PARSE_VERSION
+      ROLLOUT_PARSE_VERSION
     ) as { has_stale_cache: number } | undefined;
     database.close();
     return Boolean(staleRow?.has_stale_cache);
@@ -982,20 +1065,28 @@ export class TokenCollectorService {
       SELECT COUNT(*) AS count
       FROM rollout_hourly_model_usage
     `).get() as { count: number };
+    const toolUsageCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM tool_token_attribution
+    `).get() as { count: number };
     database.close();
 
     const indexedMap = new Map(indexedRows.map((row) => [row.rollout_path, row]));
     const currentPaths = new Set<string>();
     const changedFiles: RolloutFileState[] = [];
+    let truncateToolUsage = toolUsageCount.count > 0 && indexedRows.length === 0;
 
     for (const file of files) {
       currentPaths.add(file.rolloutPath);
       const previous = indexedMap.get(file.rolloutPath);
+      if (previous && previous.parse_version !== ROLLOUT_PARSE_VERSION) {
+        truncateToolUsage = true;
+      }
       if (
         !previous ||
         previous.file_size !== file.fileSize ||
         previous.mtime_ms !== file.mtimeMs ||
-        previous.parse_version !== CACHE_PARSE_VERSION
+        previous.parse_version !== ROLLOUT_PARSE_VERSION
       ) {
         changedFiles.push(file);
       }
@@ -1012,7 +1103,8 @@ export class TokenCollectorService {
       totalRollouts: files.length,
       changedFiles,
       deletedPaths: [...new Set([...deletedPaths, ...staleSyntheticPaths])],
-      hasCache: usageCount.count > 0 || modelUsageCount.count > 0 || indexedRows.length > 0
+      truncateToolUsage,
+      hasCache: usageCount.count > 0 || modelUsageCount.count > 0 || toolUsageCount.count > 0 || indexedRows.length > 0
     };
   }
 
@@ -1031,9 +1123,14 @@ export class TokenCollectorService {
 
       database.exec("BEGIN");
 
+      if (preparation.truncateToolUsage) {
+        database.prepare(`DELETE FROM tool_token_attribution`).run();
+      }
+
       for (const rolloutPath of preparation.deletedPaths) {
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(rolloutPath);
         database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(rolloutPath);
+        database.prepare(`DELETE FROM tool_token_attribution WHERE rollout_path = ?`).run(rolloutPath);
         database.prepare(`DELETE FROM rollout_index_state WHERE rollout_path = ?`).run(rolloutPath);
       }
 
@@ -1044,6 +1141,7 @@ export class TokenCollectorService {
           : parseRolloutUsage(file.rolloutPath, provider);
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(file.rolloutPath);
         database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(file.rolloutPath);
+        database.prepare(`DELETE FROM tool_token_attribution WHERE rollout_path = ?`).run(file.rolloutPath);
 
         const insertUsage = database.prepare(`
           INSERT INTO rollout_hourly_usage (
@@ -1077,6 +1175,17 @@ export class TokenCollectorService {
             reasoning_output_tokens,
             request_count
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const upsertToolUsage = database.prepare(`
+          INSERT INTO tool_token_attribution (
+            rollout_path,
+            hour_bucket,
+            provider,
+            tool_name,
+            call_count
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(rollout_path, hour_bucket, provider, tool_name) DO UPDATE SET
+            call_count = excluded.call_count
         `);
         const project = parsed.project ?? createUnknownProjectInfo();
 
@@ -1115,6 +1224,16 @@ export class TokenCollectorService {
           );
         }
 
+        for (const toolUsage of parsed.hourlyToolUsage.values()) {
+          upsertToolUsage.run(
+            file.rolloutPath,
+            toolUsage.hourBucket,
+            toolUsage.provider,
+            toolUsage.toolName,
+            toolUsage.callCount
+          );
+        }
+
         database.prepare(`
           INSERT INTO rollout_index_state (
             rollout_path,
@@ -1133,7 +1252,7 @@ export class TokenCollectorService {
           file.fileSize,
           file.mtimeMs,
           toLocalDateTime(new Date()) ?? "",
-          CACHE_PARSE_VERSION
+          ROLLOUT_PARSE_VERSION
         );
 
         stats.updatedRollouts += 1;
@@ -1418,6 +1537,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
   const lines = text.split("\n");
   const hourlyUsage = new Map<string, UsageAccumulator>();
   const hourlyModelUsage = new Map<string, ModelUsageAccumulator>();
+  const hourlyToolUsage = new Map<string, ToolUsageAccumulator>();
   let project: ResolvedProjectInfo | null = sessionLogProvider.resolveProjectInfoForRolloutPath(rolloutPath);
   let currentModelProvider: string | null = null;
   let currentModelName: string | null = null;
@@ -1467,6 +1587,20 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     }
 
     if (parsed.type !== "event_msg") {
+      if (parsed.type === "response_item" && payload.type === "function_call" && payload.name === "exec_command") {
+        const rawTimestamp = readLineTimestamp(parsed, payload);
+        if (rawTimestamp) {
+          const timestamp = new Date(rawTimestamp);
+          if (!Number.isNaN(timestamp.getTime())) {
+            const hourBucket = formatHourBucket(timestamp);
+            for (const cmd of extractCodexExecCommands(payload.arguments)) {
+              for (const toolName of extractCodexToolNames(cmd)) {
+                addToolUsage(hourlyToolUsage, hourBucket, "codex", toolName);
+              }
+            }
+          }
+        }
+      }
       continue;
     }
 
@@ -1537,6 +1671,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     project,
     hourlyUsage,
     hourlyModelUsage,
+    hourlyToolUsage,
     tokenEvents
   };
 }
@@ -1549,6 +1684,7 @@ function parseClaudeCodeTranscriptUsage(
   const lines = text.split("\n");
   const hourlyUsage = new Map<string, UsageAccumulator>();
   const hourlyModelUsage = new Map<string, ModelUsageAccumulator>();
+  const hourlyToolUsage = new Map<string, ToolUsageAccumulator>();
   let project: ResolvedProjectInfo | null = sessionLogProvider.resolveProjectInfoForRolloutPath(rolloutPath);
   let tokenEvents = 0;
 
@@ -1583,6 +1719,20 @@ function parseClaudeCodeTranscriptUsage(
       continue;
     }
 
+    const rawTimestamp = readOptionalString(parsed, "timestamp");
+    const timestamp = rawTimestamp ? new Date(rawTimestamp) : null;
+    if (timestamp && !Number.isNaN(timestamp.getTime())) {
+      const hourBucket = formatHourBucket(timestamp);
+      const content = Array.isArray(message.content) ? message.content : [];
+      for (const block of content) {
+        if (!isRecord(block) || block.type !== "tool_use" || typeof block.name !== "string") {
+          continue;
+        }
+
+        addToolUsage(hourlyToolUsage, hourBucket, "claude-code", extractClaudeToolName(block.name));
+      }
+    }
+
     const usage = isRecord(message.usage) ? message.usage : null;
     if (!usage) {
       continue;
@@ -1593,13 +1743,11 @@ function parseClaudeCodeTranscriptUsage(
       continue;
     }
 
-    const rawTimestamp = readOptionalString(parsed, "timestamp");
     if (!rawTimestamp) {
       continue;
     }
 
-    const timestamp = new Date(rawTimestamp);
-    if (Number.isNaN(timestamp.getTime())) {
+    if (!timestamp || Number.isNaN(timestamp.getTime())) {
       continue;
     }
 
@@ -1649,8 +1797,68 @@ function parseClaudeCodeTranscriptUsage(
     project,
     hourlyUsage,
     hourlyModelUsage,
+    hourlyToolUsage,
     tokenEvents
   };
+}
+
+function extractCodexExecCommands(argumentsValue: unknown): string[] {
+  let parsedArguments: unknown = argumentsValue;
+  if (typeof argumentsValue === "string") {
+    try {
+      parsedArguments = JSON.parse(argumentsValue) as unknown;
+    } catch {
+      return [];
+    }
+  }
+
+  if (!isRecord(parsedArguments)) {
+    return [];
+  }
+
+  const cmd = parsedArguments.cmd;
+  if (typeof cmd === "string") {
+    return [cmd];
+  }
+
+  if (Array.isArray(cmd)) {
+    return cmd.filter((entry): entry is string => typeof entry === "string");
+  }
+
+  return [];
+}
+
+function addToolUsage(
+  toolUsage: Map<string, ToolUsageAccumulator>,
+  hourBucket: string,
+  provider: ToolUsageEntry["provider"],
+  toolName: string
+): void {
+  const normalizedToolName = toolName.trim();
+  if (!normalizedToolName) {
+    return;
+  }
+
+  const key = createToolUsageKey(hourBucket, provider, normalizedToolName);
+  const accumulator = toolUsage.get(key) ?? {
+    hourBucket,
+    provider,
+    toolName: normalizedToolName,
+    callCount: 0
+  };
+  accumulator.callCount += 1;
+  toolUsage.set(key, accumulator);
+}
+
+function readLineTimestamp(
+  parsed: { timestamp?: unknown },
+  payload: Record<string, unknown>
+): string | null {
+  return typeof parsed.timestamp === "string"
+    ? parsed.timestamp
+    : typeof payload.timestamp === "string"
+      ? payload.timestamp
+      : null;
 }
 
 function parseUsageBlock(value: unknown): ParsedUsageBlock {
@@ -1808,6 +2016,14 @@ function mapModelUsageRow(row: ModelUsageRow): ModelTokenUsageItem {
     modelName: row.model_name || UNKNOWN_MODEL_NAME,
     modelProvider: normalizeProvider(row.model_provider),
     totalTokens: row.total_tokens
+  };
+}
+
+function mapToolUsageRow(row: ToolUsageRow): ToolUsageEntry {
+  return {
+    provider: row.provider,
+    toolName: row.tool_name,
+    callCount: row.call_count
   };
 }
 
@@ -1989,6 +2205,10 @@ function normalizeProvider(value: string | null | undefined): string | null {
 
 function createModelUsageKey(hourBucket: string, modelName: string | null, modelProvider: string | null): string {
   return `${hourBucket}\u0000${modelName?.trim() || UNKNOWN_MODEL_NAME}\u0000${normalizeProvider(modelProvider) ?? ""}`;
+}
+
+function createToolUsageKey(hourBucket: string, provider: ToolUsageEntry["provider"], toolName: string): string {
+  return `${hourBucket}\u0000${provider}\u0000${toolName}`;
 }
 
 /**
