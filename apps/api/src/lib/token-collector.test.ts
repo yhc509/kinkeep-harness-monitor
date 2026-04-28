@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeCodeDataService } from "./claude-code-service";
 import { CodexDataService } from "./codex-service";
 import { TokenCollectorService } from "./token-collector";
@@ -11,6 +11,8 @@ import { createTestFixture } from "../test-support/fixture";
 const fixtures: Array<{ cleanup: () => void }> = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
+
   while (fixtures.length > 0) {
     fixtures.pop()?.cleanup();
   }
@@ -44,6 +46,7 @@ describe("TokenCollectorService", () => {
     expect(tokens.hourly[0]?.totalTokens).toBe(140);
     expect(tokens.hourly[0]?.uncachedInputTokens).toBe(80);
     expect(tokens.hourly[0]?.requestCount).toBe(1);
+    expect(tokens.daily[0]?.totalTokens).toBe(tokens.hourly.reduce((sum, row) => sum + row.totalTokens, 0));
     expect(tokens.daily[0]?.estimatedCost).toBeCloseTo(0.000805, 8);
     expect(tokens.hourly[0]?.estimatedCost).toBeCloseTo(0.000805, 8);
     expect(tokens.modelUsage).toEqual([
@@ -756,6 +759,225 @@ describe("TokenCollectorService", () => {
     });
   });
 
+  it("builds session duration buckets from rollout line timestamps split by 30-minute gaps", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    writeTokenTimeline(fixture.rolloutPath, [
+      ["2026-03-14T09:00:00+09:00", 10],
+      ["2026-03-14T09:05:00+09:00", 20],
+      ["2026-03-14T09:35:00+09:00", 30],
+      ["2026-03-14T10:00:00+09:00", 40],
+      ["2026-03-14T10:25:00+09:00", 50],
+      ["2026-03-14T10:55:00+09:00", 60],
+      ["2026-03-14T11:20:00+09:00", 70],
+      ["2026-03-14T11:45:00+09:00", 80],
+      ["2026-03-14T12:00:00+09:00", 90]
+    ]);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
+    expect(tokens.patterns.sessionDuration.startHistogram).toEqual([
+      { hour: 9, count: 2 },
+      { hour: 10, count: 1 }
+    ]);
+    expect(tokens.patterns.sessionDuration.durationBuckets).toEqual([
+      { bucketMin: 0, bucketMax: 30, count: 1 },
+      { bucketMin: 30, bucketMax: 60, count: 1 },
+      { bucketMin: 60, bucketMax: 120, count: 1 },
+      { bucketMin: 120, bucketMax: 240, count: 0 },
+      { bucketMin: 240, bucketMax: 480, count: 0 },
+      { bucketMin: 480, bucketMax: 1440, count: 0 },
+      { bucketMin: 1440, bucketMax: 10080, count: 0 },
+      { bucketMin: 10080, bucketMax: 525600, count: 0 }
+    ]);
+  });
+
+  it("keeps the true start for sessions that begin before the selected range", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    writeTokenTimeline(fixture.rolloutPath, [
+      ["2026-03-14T23:55:00+09:00", 10],
+      ["2026-03-15T00:10:00+09:00", 20]
+    ]);
+
+    collector.captureSnapshot(new Date("2026-03-15T01:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-15T01:00:00+09:00"));
+    expect(tokens.patterns.sessionDuration.startHistogram).toEqual([
+      { hour: 23, count: 1 }
+    ]);
+    expect(tokens.patterns.sessionDuration.durationBuckets[0]).toEqual({
+      bucketMin: 0,
+      bucketMax: 30,
+      count: 1
+    });
+  });
+
+  it("uses floored session minutes for duration bucket boundaries", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+
+    writeTokenTimeline(fixture.rolloutPath, [
+      ["2026-03-14T09:00:00+09:00", 10],
+      ["2026-03-14T09:29:59+09:00", 20],
+      ["2026-03-14T10:00:00+09:00", 30],
+      ["2026-03-14T10:15:00+09:00", 40],
+      ["2026-03-14T10:30:00+09:00", 50],
+      ["2026-03-14T11:00:00+09:00", 60],
+      ["2026-03-14T11:20:00+09:00", 70],
+      ["2026-03-14T11:40:00+09:00", 80],
+      ["2026-03-14T12:00:00+09:00", 90]
+    ]);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const tokens = collector.getTokens(1, new Date("2026-03-14T20:00:00+09:00"));
+    expect(tokens.patterns.sessionDuration.durationBuckets.find((bucket) => bucket.bucketMin === 0)).toMatchObject({
+      bucketMin: 0,
+      bucketMax: 30,
+      count: 1
+    });
+    expect(tokens.patterns.sessionDuration.durationBuckets.find((bucket) => bucket.bucketMin === 30)).toMatchObject({
+      bucketMin: 30,
+      bucketMax: 60,
+      count: 1
+    });
+    expect(tokens.patterns.sessionDuration.durationBuckets.find((bucket) => bucket.bucketMin === 60)).toMatchObject({
+      bucketMin: 60,
+      bucketMax: 120,
+      count: 1
+    });
+  });
+
+  it("skips unreadable rollout paths when building patterns", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const originalReadFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((filePath: fs.PathOrFileDescriptor, options?: unknown) => {
+      if (filePath === fixture.rolloutPath) {
+        throw Object.assign(new Error("EACCES: permission denied, open"), { code: "EACCES" });
+      }
+
+      return originalReadFileSync(filePath, options as never);
+    }) as typeof fs.readFileSync);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const patterns = collector.getPatterns(1, new Date("2026-03-14T20:00:00+09:00"));
+
+    expect(patterns.dowHourHeatmap).toEqual([
+      {
+        dow: 6,
+        hour: 19,
+        totalTokens: 140,
+        requestCount: 1
+      }
+    ]);
+    expect(patterns.sessionDuration).toEqual({
+      startHistogram: [],
+      durationBuckets: []
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(`[token-collector] Skipping rollout file ${fixture.rolloutPath}: EACCES`);
+  });
+
+  it("computes pattern hours from naked-local hour buckets without SQLite strftime", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const collector = new TokenCollectorService(fixture.config, [new CodexDataService(fixture.config)]);
+    collector.ensureSchema();
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    insertHourlyUsage(database, {
+      rolloutPath: "/missing/saturday.jsonl",
+      hourBucket: "2026-04-25T00:00:00",
+      totalTokens: 10,
+      inputTokens: 10
+    });
+    insertHourlyUsage(database, {
+      rolloutPath: "/missing/sunday-night.jsonl",
+      hourBucket: "2026-04-26T23:00:00",
+      totalTokens: 20,
+      inputTokens: 20
+    });
+    insertHourlyUsage(database, {
+      rolloutPath: "/missing/monday-midnight.jsonl",
+      hourBucket: "2026-04-27T00:00:00",
+      totalTokens: 30,
+      inputTokens: 30
+    });
+    database.close();
+
+    const patterns = collector.getPatterns(3, new Date("2026-04-27T12:00:00+09:00"));
+    expect(patterns.dowHourHeatmap).toEqual([
+      { dow: 0, hour: 23, totalTokens: 20, requestCount: 1 },
+      { dow: 1, hour: 0, totalTokens: 30, requestCount: 1 },
+      { dow: 6, hour: 0, totalTokens: 10, requestCount: 1 }
+    ]);
+  });
+
+  it("uses active days for hourly averages and input_tokens for cache hit denominator", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const collector = new TokenCollectorService(fixture.config, [new CodexDataService(fixture.config)]);
+    collector.ensureSchema();
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    insertHourlyUsage(database, {
+      rolloutPath: "/missing/day-one.jsonl",
+      hourBucket: "2026-04-25T09:00:00",
+      totalTokens: 100,
+      inputTokens: 50,
+      cachedInputTokens: 25,
+      cacheCreationInputTokens: 20,
+      uncachedInputTokens: 25
+    });
+    insertHourlyUsage(database, {
+      rolloutPath: "/missing/day-two.jsonl",
+      hourBucket: "2026-04-26T09:00:00",
+      totalTokens: 300,
+      inputTokens: 300
+    });
+    insertHourlyUsage(database, {
+      rolloutPath: "/missing/other-hour.jsonl",
+      hourBucket: "2026-04-26T10:00:00",
+      totalTokens: 900,
+      inputTokens: 900
+    });
+    database.close();
+
+    const patterns = collector.getPatterns(2, new Date("2026-04-26T20:00:00+09:00"));
+    expect(patterns.hourOfDayAverages.find((entry) => entry.hour === 9)).toEqual({
+      hour: 9,
+      avgTokens: 200,
+      avgRequests: 1,
+      sampleDays: 2
+    });
+    expect(patterns.hourOfDayAverages.find((entry) => entry.hour === 10)).toEqual({
+      hour: 10,
+      avgTokens: 900,
+      avgRequests: 1,
+      sampleDays: 1
+    });
+    expect(patterns.hourOfDayCacheHit.find((entry) => entry.hour === 9)?.hitRate).toBeCloseTo(25 / 350, 6);
+  });
+
   it("imports Claude Code stats-cache daily usage into token queries", () => {
     const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
     fixtures.push(fixture);
@@ -1236,6 +1458,100 @@ function writeTokenRollout(
   });
 
   fs.writeFileSync(path.join(sessionRoot, `rollout-${slug}.jsonl`), lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
+function writeTokenTimeline(rolloutPath: string, events: Array<[timestamp: string, totalTokens: number]>): void {
+  const lines: Array<Record<string, unknown>> = [
+    {
+      timestamp: events[0]?.[0] ?? "2026-03-14T09:00:00+09:00",
+      type: "session_meta",
+      payload: {
+        cli_version: "0.114.0",
+        model_provider: "openai"
+      }
+    },
+    {
+      timestamp: events[0]?.[0] ?? "2026-03-14T09:00:00+09:00",
+      type: "turn_context",
+      payload: {
+        model: "gpt-5.4"
+      }
+    }
+  ];
+
+  let previousTotal = 0;
+  for (const [timestamp, totalTokens] of events) {
+    lines.push({
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            total_tokens: totalTokens
+          },
+          last_token_usage: {
+            total_tokens: totalTokens - previousTotal
+          }
+        }
+      }
+    });
+    previousTotal = totalTokens;
+  }
+
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
+function insertHourlyUsage(
+  database: DatabaseSync,
+  input: {
+    rolloutPath: string;
+    hourBucket: string;
+    totalTokens: number;
+    inputTokens: number;
+    cachedInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    uncachedInputTokens?: number;
+    outputTokens?: number;
+    requestCount?: number;
+  }
+): void {
+  const cachedInputTokens = input.cachedInputTokens ?? 0;
+  const cacheCreationInputTokens = input.cacheCreationInputTokens ?? 0;
+  const uncachedInputTokens = input.uncachedInputTokens ?? Math.max(0, input.inputTokens - cachedInputTokens);
+  const outputTokens = input.outputTokens ?? Math.max(0, input.totalTokens - input.inputTokens);
+
+  database.prepare(`
+    INSERT INTO rollout_hourly_usage (
+      rollout_path,
+      hour_bucket,
+      project_id,
+      project_name,
+      project_path,
+      total_tokens,
+      input_tokens,
+      cached_input_tokens,
+      cache_creation_input_tokens,
+      uncached_input_tokens,
+      output_tokens,
+      reasoning_output_tokens,
+      request_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.rolloutPath,
+    input.hourBucket,
+    "__test__",
+    "Test",
+    "",
+    input.totalTokens,
+    input.inputTokens,
+    cachedInputTokens,
+    cacheCreationInputTokens,
+    uncachedInputTokens,
+    outputTokens,
+    0,
+    input.requestCount ?? 1
+  );
 }
 
 function insertThreadRow(

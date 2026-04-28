@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "./server";
 import { createTestFixture } from "./test-support/fixture";
@@ -96,6 +97,39 @@ describe("API server", () => {
     expect(tokens.json().daily.some((entry: { totalTokens: number }) => entry.totalTokens === 140)).toBe(true);
     expect(tokens.json().dailyProviderTokens).toBeDefined();
     expect(tokens.json().dailyProviderTokens.some((entry: { codexTokens: number }) => entry.codexTokens === 140)).toBe(true);
+    expect(tokens.json().patterns.dowHourHeatmap).toEqual([
+      {
+        dow: 6,
+        hour: 19,
+        totalTokens: 140,
+        requestCount: 1
+      }
+    ]);
+    expect(tokens.json().patterns.hourOfDayAverages).toEqual([
+      {
+        hour: 19,
+        avgTokens: 140,
+        avgRequests: 1,
+        sampleDays: 1
+      }
+    ]);
+    expect(tokens.json().patterns.hourOfDayCacheHit).toHaveLength(1);
+    expect(tokens.json().patterns.hourOfDayCacheHit[0]).toMatchObject({
+      hour: 19,
+      sampleRequests: 1
+    });
+    expect(tokens.json().patterns.hourOfDayCacheHit[0].hitRate).toBeCloseTo(0.2, 6);
+    expect(tokens.json().patterns.sessionDuration.startHistogram).toEqual([
+      {
+        hour: 19,
+        count: 1
+      }
+    ]);
+    expect(tokens.json().patterns.sessionDuration.durationBuckets[0]).toEqual({
+      bucketMin: 0,
+      bucketMax: 30,
+      count: 1
+    });
     expect(tokens.json().modelUsage).toEqual([
       {
         modelName: "gpt-5.4",
@@ -138,6 +172,44 @@ describe("API server", () => {
     });
     expect(refreshIntegrations.statusCode).toBe(200);
     expect(refreshIntegrations.json().lastSyncedAt).not.toBeNull();
+
+    await app.close();
+  });
+
+  it("returns empty token usage patterns when rollout hourly usage is empty", async () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const app = await buildServer(fixture.config);
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    database.exec(`
+      DELETE FROM rollout_hourly_model_usage;
+      DELETE FROM rollout_hourly_usage;
+    `);
+    database.close();
+
+    const tokens = await app.inject({
+      method: "GET",
+      url: "/api/tokens?range=7"
+    });
+
+    expect(tokens.statusCode).toBe(200);
+    expect(tokens.json().currentHourTokens).toEqual({
+      totalTokens: 0,
+      cachedInputTokens: 0,
+      uncachedTokens: 0
+    });
+    expect(tokens.json().daily.every((entry: { totalTokens: number }) => entry.totalTokens === 0)).toBe(true);
+    expect(tokens.json().hourly).toEqual([]);
+    expect(tokens.json().patterns).toEqual({
+      dowHourHeatmap: [],
+      hourOfDayAverages: [],
+      hourOfDayCacheHit: [],
+      sessionDuration: {
+        startHistogram: [],
+        durationBuckets: []
+      }
+    });
 
     await app.close();
   });

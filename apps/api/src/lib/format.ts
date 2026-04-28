@@ -55,6 +55,28 @@ export function formatHourBucket(date: Date): string {
   return toLocalDateTime(hourDate) ?? "";
 }
 
+export function parseHourBucketDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6])
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function parseHourBucketTime(value: string): number {
+  return parseHourBucketDate(value)?.getTime() ?? 0;
+}
+
 export function formatDayKey(date: Date | string): string {
   const input = typeof date === "string" ? new Date(date) : date;
   return [

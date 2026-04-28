@@ -1,10 +1,16 @@
-import type { DailyTokenPoint } from "@codex-monitor/shared";
+import type { DailyTokenPoint, TokenPatterns } from "@codex-monitor/shared";
 import { useMemo } from "react";
 import { formatNumber } from "../utils/format";
 
-interface ActivityHeatmapProps {
-  data: DailyTokenPoint[];
-}
+type ActivityHeatmapProps =
+  | {
+    mode?: "calendar";
+    data: DailyTokenPoint[];
+  }
+  | {
+    mode: "dowHour";
+    data: TokenPatterns["dowHourHeatmap"];
+  };
 
 interface HeatmapCell {
   day: string;
@@ -20,8 +26,18 @@ const dayFormatter = new Intl.DateTimeFormat("en-US", {
   day: "numeric"
 });
 const weekdayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
+const dowLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const hours = Array.from({ length: 24 }, (_, index) => index);
 
-export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
+export function ActivityHeatmap(props: ActivityHeatmapProps) {
+  if (props.mode === "dowHour") {
+    return <DowHourHeatmap data={props.data} />;
+  }
+
+  return <CalendarHeatmap data={props.data} />;
+}
+
+function CalendarHeatmap({ data }: { data: DailyTokenPoint[] }) {
   const { weeks, monthLabels, activeDays } = useMemo(() => buildHeatmap(data), [data]);
 
   if (!weeks.length) {
@@ -73,6 +89,67 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
           <span>Low</span>
           {[0, 1, 2, 3, 4].map((level) => (
             <span key={`legend-${level}`} className={`heatmap-cell level-${level}`} />
+          ))}
+          <span>High</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DowHourHeatmap({ data }: { data: TokenPatterns["dowHourHeatmap"] }) {
+  const { cells, activeHours } = useMemo(() => buildDowHourHeatmap(data), [data]);
+
+  if (data.length === 0) {
+    return (
+      <div className="usage-pattern-empty">
+        <strong>데이터 없음</strong>
+      </div>
+    );
+  }
+
+  return (
+    <div className="activity-heatmap dow-hour-heatmap">
+      <div className="dow-hour-scroll">
+        <div className="dow-hour-grid" role="img" aria-label="Day of week by hour token heatmap">
+          <span className="dow-hour-corner" aria-hidden="true" />
+          {hours.map((hour) => (
+            <span key={`hour-label-${hour}`} className="dow-hour-hour-label">
+              {hour % 6 === 0 ? String(hour).padStart(2, "0") : ""}
+            </span>
+          ))}
+
+          {dowLabels.map((label, dow) => (
+            <div key={`dow-row-${label}`} className="dow-hour-row">
+              <span className="dow-hour-dow-label">{label}</span>
+              {hours.map((hour) => {
+                const cell = cells.get(createDowHourKey(dow, hour)) ?? {
+                  dow,
+                  hour,
+                  totalTokens: 0,
+                  requestCount: 0,
+                  level: 0
+                };
+
+                return (
+                  <div
+                    key={`${label}-${hour}`}
+                    className={`heatmap-cell level-${cell.level}`}
+                    title={`${label} ${String(hour).padStart(2, "0")}:00 · ${formatNumber(cell.totalTokens)} tokens · ${formatNumber(cell.requestCount)} requests`}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="heatmap-legend">
+        <span>{formatNumber(activeHours)} active hours</span>
+        <div className="heatmap-legend-scale" aria-hidden="true">
+          <span>Low</span>
+          {[0, 1, 2, 3, 4].map((level) => (
+            <span key={`dow-hour-legend-${level}`} className={`heatmap-cell level-${level}`} />
           ))}
           <span>High</span>
         </div>
@@ -148,6 +225,34 @@ function buildHeatmap(data: DailyTokenPoint[]) {
     monthLabels,
     activeDays: positiveValues.length
   };
+}
+
+export function buildDowHourHeatmap(data: TokenPatterns["dowHourHeatmap"]) {
+  const positiveValues = data
+    .map((entry) => entry.totalTokens)
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right);
+  const hasEnoughCellsForQuantiles = positiveValues.length >= 5;
+  const thresholds = hasEnoughCellsForQuantiles ? buildQuantileThresholds(positiveValues) : [0, 0, 0] as [number, number, number];
+  const cells = new Map<string, TokenPatterns["dowHourHeatmap"][number] & { level: number }>();
+
+  for (const entry of data) {
+    cells.set(createDowHourKey(entry.dow, entry.hour), {
+      ...entry,
+      level: hasEnoughCellsForQuantiles
+        ? resolveHeatLevel(entry.totalTokens, thresholds)
+        : (entry.totalTokens > 0 ? 1 : 0)
+    });
+  }
+
+  return {
+    cells,
+    activeHours: positiveValues.length
+  };
+}
+
+function createDowHourKey(dow: number, hour: number): string {
+  return `${dow}:${hour}`;
 }
 
 function parseDayKey(day: string): Date {
