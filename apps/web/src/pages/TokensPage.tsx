@@ -3,10 +3,14 @@ import type { TokenPeriodUnit } from "@codex-monitor/shared";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw } from "lucide-react";
 import { apiResourceKeys, createSnapshot, getProjectTokenUsage, getTokens } from "../api";
+import { ActivityHeatmap } from "../components/ActivityHeatmap";
 import { AsyncPane } from "../components/AsyncPane";
+import { HourlyCacheHitChart } from "../components/HourlyCacheHitChart";
+import { HourOfDayChart } from "../components/HourOfDayChart";
 import { ModelUsageDonutChart } from "../components/ModelUsageDonutChart";
 import { Panel } from "../components/Panel";
 import { ProjectBubbleChart } from "../components/ProjectBubbleChart";
+import { SessionDurationChart } from "../components/SessionDurationChart";
 import { StatStrip } from "../components/StatStrip";
 import { StatusPill } from "../components/StatusPill";
 import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
@@ -302,6 +306,42 @@ export function TokensPage() {
                 </Panel>
               ) : null}
             </AsyncPane>
+
+            <Panel
+              title="사용 패턴"
+              subtitle={`${range}-day local-hour view`}
+              icon={<Clock3 size={16} strokeWidth={2.2} />}
+            >
+              <div className="usage-patterns-layout">
+                <div className="usage-pattern-toolbar">
+                  <div className="segmented">
+                    {ranges.map((item) => (
+                      <button
+                        key={item}
+                        className={item === range ? "segment active" : "segment"}
+                        onClick={() => setRange(item)}
+                      >
+                        {item}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="usage-chart-block wide">
+                  <div className="usage-chart-header">
+                    <h3>요일 × 시간</h3>
+                    <span>총 토큰</span>
+                  </div>
+                  <ActivityHeatmap mode="dowHour" data={tokens.data.patterns.dowHourHeatmap} />
+                </div>
+
+                <div className="usage-pattern-grid">
+                  <HourOfDayChart data={tokens.data.patterns.hourOfDayAverages} />
+                  <HourlyCacheHitChart data={tokens.data.patterns.hourOfDayCacheHit} />
+                  <SessionDurationChart data={tokens.data.patterns.sessionDuration} />
+                </div>
+              </div>
+            </Panel>
 
             <div className="fold-list">
               <details className="fold-panel">

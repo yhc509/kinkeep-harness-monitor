@@ -162,6 +162,37 @@ export const modelTokenUsageItemSchema = z.object({
   totalTokens: z.number()
 });
 
+export const tokenPatternsSchema = z.object({
+  dowHourHeatmap: z.array(z.object({
+    dow: z.number().int().min(0).max(6),
+    hour: z.number().int().min(0).max(23),
+    totalTokens: z.number(),
+    requestCount: z.number()
+  })),
+  hourOfDayAverages: z.array(z.object({
+    hour: z.number().int().min(0).max(23),
+    avgTokens: z.number(),
+    avgRequests: z.number(),
+    sampleDays: z.number()
+  })),
+  hourOfDayCacheHit: z.array(z.object({
+    hour: z.number().int().min(0).max(23),
+    hitRate: z.number(),
+    sampleRequests: z.number()
+  })),
+  sessionDuration: z.object({
+    startHistogram: z.array(z.object({
+      hour: z.number().int().min(0).max(23),
+      count: z.number()
+    })),
+    durationBuckets: z.array(z.object({
+      bucketMin: z.number(),
+      bucketMax: z.number(),
+      count: z.number()
+    }))
+  })
+});
+
 export const overviewStatsSchema = z.object({
   totalSessions: z.number(),
   activeToday: z.number(),
@@ -268,6 +299,7 @@ export const tokensResponseSchema = z.object({
   dailyProviderTokens: z.array(dailyProviderTokensSchema),
   hourly: z.array(hourlyTokenUsageSchema),
   modelUsage: z.array(modelTokenUsageItemSchema),
+  patterns: tokenPatternsSchema,
   collectorRuns: z.array(collectorRunSchema),
   lastSyncedAt: z.string().nullable()
 });
@@ -304,6 +336,7 @@ export type TokenSyncStats = z.infer<typeof tokenSyncStatsSchema>;
 export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;
 export type ProjectTokenUsageItem = z.infer<typeof projectTokenUsageItemSchema>;
 export type ModelTokenUsageItem = z.infer<typeof modelTokenUsageItemSchema>;
+export type TokenPatterns = z.infer<typeof tokenPatternsSchema>;
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 export type MemoryEntry = z.infer<typeof memoryEntrySchema>;
 export type MemoryProviderConfig = z.infer<typeof memoryProviderConfigSchema>;
