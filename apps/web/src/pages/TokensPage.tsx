@@ -313,20 +313,6 @@ export function TokensPage() {
               icon={<Clock3 size={16} strokeWidth={2.2} />}
             >
               <div className="usage-patterns-layout">
-                <div className="usage-pattern-toolbar">
-                  <div className="segmented">
-                    {ranges.map((item) => (
-                      <button
-                        key={item}
-                        className={item === range ? "segment active" : "segment"}
-                        onClick={() => setRange(item)}
-                      >
-                        {item}d
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="usage-chart-block wide">
                   <div className="usage-chart-header">
                     <h3>요일 × 시간</h3>

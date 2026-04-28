@@ -565,11 +565,6 @@ pre {
   min-width: 0;
 }
 
-.usage-pattern-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .usage-pattern-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2702,10 +2697,6 @@ pre {
 
   .dow-hour-heatmap .heatmap-legend-scale {
     flex-wrap: wrap;
-  }
-
-  .usage-pattern-toolbar {
-    justify-content: flex-start;
   }
 
   .usage-chart-canvas {

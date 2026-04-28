@@ -26,7 +26,14 @@ import {
   tokensResponseSchema
 } from "@codex-monitor/shared";
 import type { AppConfig } from "../config";
-import { formatDayKey, formatHourBucket, startOfLocalDay, startOfLocalHour, toLocalDateTime } from "./format";
+import {
+  formatDayKey,
+  formatHourBucket,
+  parseHourBucketDate,
+  startOfLocalDay,
+  startOfLocalHour,
+  toLocalDateTime
+} from "./format";
 import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
@@ -46,6 +53,7 @@ const CLAUDE_CODE_STATS_PROJECT_NAME = "Claude Code";
 const CLAUDE_CODE_STATS_PARSE_VERSION = "claude-stats-v4";
 const CLAUDE_CODE_STATS_MODEL_PROVIDER = "anthropic";
 const SYNTHETIC_ROLLOUT_PATHS = new Set([CLAUDE_CODE_STATS_ROLLOUT_PATH]);
+const SESSION_GAP_MS = 30 * 60 * 1000;
 const SESSION_DURATION_BUCKETS = [
   { bucketMin: 0, bucketMax: 30 },
   { bucketMin: 30, bucketMax: 60 },
@@ -179,31 +187,23 @@ interface ModelUsageRow {
   total_tokens: number;
 }
 
-interface DowHourPatternRow {
-  dow: number | string;
-  hour: number | string;
+interface HourlyPatternUsageRow {
+  hour_bucket: string;
   total_tokens: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_creation_input_tokens: number;
+  uncached_input_tokens: number;
   request_count: number;
 }
 
-interface HourOfDayAveragePatternRow {
-  hour: number | string;
-  avg_tokens: number;
-  avg_requests: number;
-  sample_days: number;
-}
-
-interface HourOfDayCacheHitPatternRow {
-  hour: number | string;
-  cached_input_tokens: number;
-  total_input_tokens: number;
-  sample_requests: number;
-}
-
-interface SessionDurationPatternRow {
+interface RolloutPathRow {
   rollout_path: string;
-  first_hour_bucket: string;
-  last_hour_bucket: string;
+}
+
+interface RolloutSession {
+  startMs: number;
+  endMs: number;
 }
 
 interface GroupedModelUsageRow {
@@ -524,109 +524,133 @@ export class TokenCollectorService {
         : hourlyStartDate
     );
 
-    const dailyRows = database.prepare(`
-      SELECT
-        substr(hour_bucket, 1, 10) AS day,
-        SUM(total_tokens) AS total_tokens,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
-        SUM(uncached_input_tokens) AS uncached_input_tokens,
-        SUM(output_tokens) AS output_tokens
-      FROM rollout_hourly_usage
-      WHERE hour_bucket >= ?
-      GROUP BY substr(hour_bucket, 1, 10)
-      ORDER BY day ASC
-    `).all(formatHourBucket(startDate)) as unknown as DailyUsageRow[];
+    let dailyRows: DailyUsageRow[] = [];
+    let providerDailyRows: ProviderDailyUsageRow[] = [];
+    let hourlyRows: HourlyUsageRow[] = [];
+    let runRows: CollectorRunRow[] = [];
+    let modelRows: ModelUsageRow[] = [];
+    let groupedModelUsageRows: GroupedModelUsageRow[] = [];
+    let lastSyncedRow: { finished_at: string } | undefined;
+    let patterns: TokenPatterns;
 
-    const providerDailyRows = database.prepare(`
-      SELECT
-        day,
-        provider,
-        SUM(total_tokens) AS total_tokens
-      FROM (
+    try {
+      database.exec("BEGIN");
+
+      dailyRows = database.prepare(`
         SELECT
           substr(hour_bucket, 1, 10) AS day,
-          total_tokens,
-          CASE
-            WHEN rollout_path = ? OR rollout_path LIKE '%/.claude/%' THEN 'claude-code'
-            ELSE 'codex'
-          END AS provider
+          SUM(total_tokens) AS total_tokens,
+          SUM(input_tokens) AS input_tokens,
+          SUM(cached_input_tokens) AS cached_input_tokens,
+          SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+          SUM(uncached_input_tokens) AS uncached_input_tokens,
+          SUM(output_tokens) AS output_tokens
         FROM rollout_hourly_usage
         WHERE hour_bucket >= ?
-      )
-      GROUP BY day, provider
-      ORDER BY day ASC, provider ASC
-    `).all(
-      CLAUDE_CODE_STATS_ROLLOUT_PATH,
-      formatHourBucket(startDate)
-    ) as unknown as ProviderDailyUsageRow[];
+        GROUP BY substr(hour_bucket, 1, 10)
+        ORDER BY day ASC
+      `).all(formatHourBucket(startDate)) as unknown as DailyUsageRow[];
 
-    const hourlyRows = database.prepare(`
-      SELECT
-        hour_bucket,
-        SUM(total_tokens) AS total_tokens,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
-        SUM(uncached_input_tokens) AS uncached_input_tokens,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        SUM(request_count) AS request_count
-      FROM rollout_hourly_usage
-      WHERE hour_bucket >= ?
-      GROUP BY hour_bucket
-      ORDER BY hour_bucket ASC
-    `).all(formatHourBucket(hourlyStartDate)) as unknown as HourlyUsageRow[];
+      providerDailyRows = database.prepare(`
+        SELECT
+          day,
+          provider,
+          SUM(total_tokens) AS total_tokens
+        FROM (
+          SELECT
+            substr(hour_bucket, 1, 10) AS day,
+            total_tokens,
+            CASE
+              WHEN rollout_path = ? OR rollout_path LIKE '%/.claude/%' THEN 'claude-code'
+              ELSE 'codex'
+            END AS provider
+          FROM rollout_hourly_usage
+          WHERE hour_bucket >= ?
+        )
+        GROUP BY day, provider
+        ORDER BY day ASC, provider ASC
+      `).all(
+        CLAUDE_CODE_STATS_ROLLOUT_PATH,
+        formatHourBucket(startDate)
+      ) as unknown as ProviderDailyUsageRow[];
 
-    const runRows = database.prepare(`
-      SELECT
-        id,
-        started_at,
-        finished_at,
-        status,
-        message,
-        snapshot_id
-      FROM collector_runs
-      ORDER BY id DESC
-      LIMIT 20
-    `).all() as unknown as CollectorRunRow[];
+      hourlyRows = database.prepare(`
+        SELECT
+          hour_bucket,
+          SUM(total_tokens) AS total_tokens,
+          SUM(input_tokens) AS input_tokens,
+          SUM(cached_input_tokens) AS cached_input_tokens,
+          SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+          SUM(uncached_input_tokens) AS uncached_input_tokens,
+          SUM(output_tokens) AS output_tokens,
+          SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+          SUM(request_count) AS request_count
+        FROM rollout_hourly_usage
+        WHERE hour_bucket >= ?
+        GROUP BY hour_bucket
+        ORDER BY hour_bucket ASC
+      `).all(formatHourBucket(hourlyStartDate)) as unknown as HourlyUsageRow[];
 
-    const modelRows = database.prepare(`
-      SELECT
-        model_name,
-        model_provider,
-        SUM(total_tokens) AS total_tokens
-      FROM rollout_hourly_model_usage
-      WHERE hour_bucket >= ?
-      GROUP BY model_name, model_provider
-      ORDER BY total_tokens DESC, model_name ASC
-    `).all(formatHourBucket(startDate)) as unknown as ModelUsageRow[];
-    const groupedModelUsageRows = database.prepare(`
-      SELECT
-        hour_bucket AS bucket_key,
-        model_name,
-        model_provider,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
-        SUM(uncached_input_tokens) AS uncached_input_tokens,
-        SUM(output_tokens) AS output_tokens
-      FROM rollout_hourly_model_usage
-      WHERE hour_bucket >= ?
-      GROUP BY hour_bucket, model_name, model_provider
-      ORDER BY bucket_key ASC, model_name ASC
-    `).all(costStartHourBucket) as unknown as GroupedModelUsageRow[];
+      runRows = database.prepare(`
+        SELECT
+          id,
+          started_at,
+          finished_at,
+          status,
+          message,
+          snapshot_id
+        FROM collector_runs
+        ORDER BY id DESC
+        LIMIT 20
+      `).all() as unknown as CollectorRunRow[];
 
-    const lastSyncedRow = database.prepare(`
-      SELECT finished_at
-      FROM collector_runs
-      WHERE status IN ('success', 'warning')
-      ORDER BY id DESC
-      LIMIT 1
-    `).get() as { finished_at: string } | undefined;
-    database.close();
-    const patterns = this.getPatterns(rangeDays, now);
+      modelRows = database.prepare(`
+        SELECT
+          model_name,
+          model_provider,
+          SUM(total_tokens) AS total_tokens
+        FROM rollout_hourly_model_usage
+        WHERE hour_bucket >= ?
+        GROUP BY model_name, model_provider
+        ORDER BY total_tokens DESC, model_name ASC
+      `).all(formatHourBucket(startDate)) as unknown as ModelUsageRow[];
+      groupedModelUsageRows = database.prepare(`
+        SELECT
+          hour_bucket AS bucket_key,
+          model_name,
+          model_provider,
+          SUM(input_tokens) AS input_tokens,
+          SUM(cached_input_tokens) AS cached_input_tokens,
+          SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+          SUM(uncached_input_tokens) AS uncached_input_tokens,
+          SUM(output_tokens) AS output_tokens
+        FROM rollout_hourly_model_usage
+        WHERE hour_bucket >= ?
+        GROUP BY hour_bucket, model_name, model_provider
+        ORDER BY bucket_key ASC, model_name ASC
+      `).all(costStartHourBucket) as unknown as GroupedModelUsageRow[];
+
+      lastSyncedRow = database.prepare(`
+        SELECT finished_at
+        FROM collector_runs
+        WHERE status IN ('success', 'warning')
+        ORDER BY id DESC
+        LIMIT 1
+      `).get() as { finished_at: string } | undefined;
+      patterns = this.getPatternsFromDatabase(database, rangeDays, now);
+
+      database.exec("COMMIT");
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Ignore rollback failures so we can still surface the original error.
+      }
+
+      throw error;
+    } finally {
+      database.close();
+    }
 
     const costSummaries = summarizeCostUsage(groupedModelUsageRows);
     for (const row of dailyRows) {
@@ -703,84 +727,54 @@ export class TokenCollectorService {
   getPatterns(rangeDays: number, now = new Date()): TokenPatterns {
     this.ensureSchema();
     const database = this.openMonitorDb();
+
+    try {
+      database.exec("BEGIN");
+      const patterns = this.getPatternsFromDatabase(database, rangeDays, now);
+      database.exec("COMMIT");
+      return patterns;
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Ignore rollback failures so we can still surface the original error.
+      }
+
+      throw error;
+    } finally {
+      database.close();
+    }
+  }
+
+  private getPatternsFromDatabase(database: DatabaseSync, rangeDays: number, now: Date): TokenPatterns {
     const startDate = startOfLocalDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (rangeDays - 1)));
     const startHourBucket = formatHourBucket(startDate);
-
-    const dowHourRows = database.prepare(`
+    const patternRows = database.prepare(`
       SELECT
-        CAST(strftime('%w', hour_bucket) AS INTEGER) AS dow,
-        CAST(strftime('%H', hour_bucket) AS INTEGER) AS hour,
+        hour_bucket,
         SUM(total_tokens) AS total_tokens,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+        SUM(uncached_input_tokens) AS uncached_input_tokens,
         SUM(request_count) AS request_count
       FROM rollout_hourly_usage
       WHERE hour_bucket >= ?
-      GROUP BY dow, hour
-      ORDER BY dow ASC, hour ASC
-    `).all(startHourBucket) as unknown as DowHourPatternRow[];
-
-    const hourAverageRows = database.prepare(`
-      SELECT
-        hour,
-        AVG(total_tokens) AS avg_tokens,
-        AVG(request_count) AS avg_requests,
-        COUNT(DISTINCT day) AS sample_days
-      FROM (
-        SELECT
-          substr(hour_bucket, 1, 10) AS day,
-          CAST(strftime('%H', hour_bucket) AS INTEGER) AS hour,
-          SUM(total_tokens) AS total_tokens,
-          SUM(request_count) AS request_count
-        FROM rollout_hourly_usage
-        WHERE hour_bucket >= ?
-        GROUP BY day, hour
-      )
-      GROUP BY hour
-      ORDER BY hour ASC
-    `).all(startHourBucket) as unknown as HourOfDayAveragePatternRow[];
-
-    const cacheHitRows = database.prepare(`
-      SELECT
-        CAST(strftime('%H', hour_bucket) AS INTEGER) AS hour,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        SUM(cached_input_tokens + uncached_input_tokens + cache_creation_input_tokens) AS total_input_tokens,
-        SUM(request_count) AS sample_requests
+      GROUP BY hour_bucket
+      ORDER BY hour_bucket ASC
+    `).all(startHourBucket) as unknown as HourlyPatternUsageRow[];
+    const rolloutPathRows = database.prepare(`
+      SELECT DISTINCT rollout_path
       FROM rollout_hourly_usage
-      WHERE hour_bucket >= ?
-      GROUP BY hour
-      ORDER BY hour ASC
-    `).all(startHourBucket) as unknown as HourOfDayCacheHitPatternRow[];
-
-    const sessionRows = database.prepare(`
-      SELECT
-        rollout_path,
-        MIN(hour_bucket) AS first_hour_bucket,
-        MAX(hour_bucket) AS last_hour_bucket
-      FROM rollout_hourly_usage
-      WHERE hour_bucket >= ?
-      GROUP BY rollout_path
-      ORDER BY first_hour_bucket ASC
-    `).all(startHourBucket) as unknown as SessionDurationPatternRow[];
-    database.close();
+      WHERE rollout_path != ?
+      ORDER BY rollout_path ASC
+    `).all(CLAUDE_CODE_STATS_ROLLOUT_PATH) as unknown as RolloutPathRow[];
 
     return {
-      dowHourHeatmap: dowHourRows.map((row) => ({
-        dow: Number(row.dow),
-        hour: Number(row.hour),
-        totalTokens: row.total_tokens,
-        requestCount: row.request_count
-      })),
-      hourOfDayAverages: hourAverageRows.map((row) => ({
-        hour: Number(row.hour),
-        avgTokens: row.avg_tokens,
-        avgRequests: row.avg_requests,
-        sampleDays: row.sample_days
-      })),
-      hourOfDayCacheHit: cacheHitRows.map((row) => ({
-        hour: Number(row.hour),
-        hitRate: row.total_input_tokens > 0 ? row.cached_input_tokens / row.total_input_tokens : 0,
-        sampleRequests: row.sample_requests
-      })),
-      sessionDuration: buildSessionDurationPatterns(sessionRows)
+      ...buildHourlyPatternViews(patternRows),
+      sessionDuration: buildSessionDurationPatterns(
+        buildRolloutSessions(rolloutPathRows.map((row) => row.rollout_path), startDate, now)
+      )
     };
   }
 
@@ -1200,8 +1194,142 @@ export class TokenCollectorService {
   }
 }
 
-function buildSessionDurationPatterns(rows: SessionDurationPatternRow[]): TokenPatterns["sessionDuration"] {
-  if (rows.length === 0) {
+function buildHourlyPatternViews(rows: HourlyPatternUsageRow[]): Omit<TokenPatterns, "sessionDuration"> {
+  const dowHourByKey = new Map<string, TokenPatterns["dowHourHeatmap"][number]>();
+  const activeDayAveragesByHour = new Map<number, { totalTokens: number; totalRequests: number; sampleDays: number }>();
+  const cacheHitByHour = new Map<number, { cachedInputTokens: number; inputTokens: number; sampleRequests: number }>();
+
+  for (const row of rows) {
+    const bucketDate = parseHourBucketDate(row.hour_bucket);
+    if (!bucketDate) {
+      continue;
+    }
+
+    const dow = bucketDate.getDay();
+    const hour = bucketDate.getHours();
+    const dowHourKey = `${dow}:${hour}`;
+    const dowHourEntry = dowHourByKey.get(dowHourKey) ?? {
+      dow,
+      hour,
+      totalTokens: 0,
+      requestCount: 0
+    };
+    dowHourEntry.totalTokens += row.total_tokens;
+    dowHourEntry.requestCount += row.request_count;
+    dowHourByKey.set(dowHourKey, dowHourEntry);
+
+    // Active-day average: only day/hour rows with activity count toward the denominator.
+    const hourAverageEntry = activeDayAveragesByHour.get(hour) ?? {
+      totalTokens: 0,
+      totalRequests: 0,
+      sampleDays: 0
+    };
+    hourAverageEntry.totalTokens += row.total_tokens;
+    hourAverageEntry.totalRequests += row.request_count;
+    hourAverageEntry.sampleDays += 1;
+    activeDayAveragesByHour.set(hour, hourAverageEntry);
+
+    const cacheEntry = cacheHitByHour.get(hour) ?? {
+      cachedInputTokens: 0,
+      inputTokens: 0,
+      sampleRequests: 0
+    };
+    cacheEntry.cachedInputTokens += row.cached_input_tokens;
+    cacheEntry.inputTokens += row.input_tokens;
+    cacheEntry.sampleRequests += row.request_count;
+    cacheHitByHour.set(hour, cacheEntry);
+  }
+
+  return {
+    dowHourHeatmap: Array.from(dowHourByKey.values())
+      .sort((left, right) => left.dow - right.dow || left.hour - right.hour),
+    hourOfDayAverages: Array.from(activeDayAveragesByHour.entries())
+      .sort(([leftHour], [rightHour]) => leftHour - rightHour)
+      .map(([hour, entry]) => ({
+        hour,
+        avgTokens: entry.sampleDays > 0 ? entry.totalTokens / entry.sampleDays : 0,
+        avgRequests: entry.sampleDays > 0 ? entry.totalRequests / entry.sampleDays : 0,
+        sampleDays: entry.sampleDays
+      })),
+    hourOfDayCacheHit: Array.from(cacheHitByHour.entries())
+      .sort(([leftHour], [rightHour]) => leftHour - rightHour)
+      .map(([hour, entry]) => ({
+        hour,
+        hitRate: entry.inputTokens > 0 ? entry.cachedInputTokens / entry.inputTokens : 0,
+        sampleRequests: entry.sampleRequests
+      }))
+  };
+}
+
+function buildRolloutSessions(rolloutPaths: string[], startDate: Date, now: Date): RolloutSession[] {
+  const rangeStartMs = startDate.getTime();
+  const nowMs = now.getTime();
+
+  return rolloutPaths
+    .filter((rolloutPath) => !isSyntheticRolloutPath(rolloutPath))
+    .flatMap(parseRolloutLineSessions)
+    .filter((session) => session.endMs >= rangeStartMs && session.startMs <= nowMs)
+    .sort((left, right) => left.startMs - right.startMs);
+}
+
+function parseRolloutLineSessions(rolloutPath: string): RolloutSession[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(rolloutPath, "utf8");
+  } catch (error) {
+    if (isFileMissingError(error)) {
+      return [];
+    }
+
+    throw error instanceof Error ? error : new Error(`Failed to read rollout sessions: ${rolloutPath}`);
+  }
+
+  const timestamps = text.split("\n")
+    .flatMap((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) {
+        return [];
+      }
+
+      let parsed: { timestamp?: unknown };
+      try {
+        parsed = JSON.parse(line) as { timestamp?: unknown };
+      } catch {
+        return [];
+      }
+
+      if (typeof parsed.timestamp !== "string") {
+        return [];
+      }
+
+      const time = Date.parse(parsed.timestamp);
+      return Number.isNaN(time) ? [] : [time];
+    })
+    .sort((left, right) => left - right);
+
+  if (timestamps.length === 0) {
+    return [];
+  }
+
+  const sessions: RolloutSession[] = [];
+  let startMs = timestamps[0]!;
+  let endMs = timestamps[0]!;
+
+  for (const nextMs of timestamps.slice(1)) {
+    if ((nextMs - endMs) >= SESSION_GAP_MS) {
+      sessions.push({ startMs, endMs });
+      startMs = nextMs;
+    }
+
+    endMs = nextMs;
+  }
+
+  sessions.push({ startMs, endMs });
+  return sessions;
+}
+
+function buildSessionDurationPatterns(sessions: RolloutSession[]): TokenPatterns["sessionDuration"] {
+  if (sessions.length === 0) {
     return {
       startHistogram: [],
       durationBuckets: []
@@ -1214,13 +1342,13 @@ function buildSessionDurationPatterns(rows: SessionDurationPatternRow[]): TokenP
     count: 0
   }));
 
-  for (const row of rows) {
-    const startHour = readHourFromHourBucket(row.first_hour_bucket);
+  for (const session of sessions) {
+    const startHour = new Date(session.startMs).getHours();
     startCountsByHour.set(startHour, (startCountsByHour.get(startHour) ?? 0) + 1);
 
     const durationMinutes = Math.max(
       0,
-      Math.round((parseHourBucketTime(row.last_hour_bucket) - parseHourBucketTime(row.first_hour_bucket)) / 60_000)
+      Math.round((session.endMs - session.startMs) / 60_000)
     );
     const bucket = durationBuckets.find((candidate, index) => (
       durationMinutes >= candidate.bucketMin
@@ -1238,26 +1366,6 @@ function buildSessionDurationPatterns(rows: SessionDurationPatternRow[]): TokenP
       .map(([hour, count]) => ({ hour, count })),
     durationBuckets
   };
-}
-
-function readHourFromHourBucket(value: string): number {
-  return Number(value.slice(11, 13));
-}
-
-function parseHourBucketTime(value: string): number {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(value);
-  if (!match) {
-    return 0;
-  }
-
-  return new Date(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3]),
-    Number(match[4]),
-    Number(match[5]),
-    Number(match[6])
-  ).getTime();
 }
 
 function insertCollectorRun(

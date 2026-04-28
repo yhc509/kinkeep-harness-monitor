@@ -227,18 +227,21 @@ function buildHeatmap(data: DailyTokenPoint[]) {
   };
 }
 
-function buildDowHourHeatmap(data: TokenPatterns["dowHourHeatmap"]) {
+export function buildDowHourHeatmap(data: TokenPatterns["dowHourHeatmap"]) {
   const positiveValues = data
     .map((entry) => entry.totalTokens)
     .filter((value) => value > 0)
     .sort((left, right) => left - right);
-  const thresholds = buildQuantileThresholds(positiveValues);
+  const hasEnoughCellsForQuantiles = positiveValues.length >= 5;
+  const thresholds = hasEnoughCellsForQuantiles ? buildQuantileThresholds(positiveValues) : [0, 0, 0] as [number, number, number];
   const cells = new Map<string, TokenPatterns["dowHourHeatmap"][number] & { level: number }>();
 
   for (const entry of data) {
     cells.set(createDowHourKey(entry.dow, entry.hour), {
       ...entry,
-      level: resolveHeatLevel(entry.totalTokens, thresholds)
+      level: hasEnoughCellsForQuantiles
+        ? resolveHeatLevel(entry.totalTokens, thresholds)
+        : (entry.totalTokens > 0 ? 1 : 0)
     });
   }
 

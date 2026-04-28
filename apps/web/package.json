@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codex-monitor/shared": "workspace:*",
