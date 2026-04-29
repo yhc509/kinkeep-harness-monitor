@@ -558,23 +558,6 @@ pre {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.usage-patterns-layout {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-}
-
-.usage-pattern-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.usage-pattern-grid .usage-chart-block:last-child {
-  grid-column: 1 / -1;
-}
-
 .usage-chart-block {
   min-width: 0;
   padding-top: 14px;
@@ -879,12 +862,6 @@ pre {
   border-radius: 10px;
   color: var(--text-soft);
   font-size: 0.82rem;
-}
-
-.session-duration-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
 }
 
 .usage-pattern-empty {
@@ -2735,11 +2712,6 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .usage-pattern-grid,
-  .session-duration-grid {
-    grid-template-columns: 1fr;
-  }
-
   .cache-trend-layout {
     grid-template-columns: 1fr;
   }
@@ -2749,10 +2721,6 @@ pre {
     padding-left: 0;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     border-left: 0;
-  }
-
-  .usage-pattern-grid .usage-chart-block:last-child {
-    grid-column: auto;
   }
 
   .memory-provider-columns {
