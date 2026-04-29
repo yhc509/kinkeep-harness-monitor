@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeCodeDataService } from "./claude-code-service";
 import { CodexDataService } from "./codex-service";
-import { BREAK_PARSE_VERSION, TokenCollectorService } from "./token-collector";
+import { BREAK_PARSE_VERSION, TOKEN_ATTRIBUTION_PARSE_VERSION, TokenCollectorService } from "./token-collector";
 import { createClaudeCodeTestFixture } from "../test-support/claude-fixture";
 import { createTestFixture } from "../test-support/fixture";
 
@@ -1225,12 +1225,22 @@ describe("TokenCollectorService", () => {
       },
       {
         provider: "codex",
+        toolName: "mcp__obsidian__read_file",
+        callCount: 1
+      },
+      {
+        provider: "codex",
         toolName: "nl",
         callCount: 1
       },
       {
         provider: "codex",
         toolName: "sed",
+        callCount: 1
+      },
+      {
+        provider: "codex",
+        toolName: "write_stdin",
         callCount: 1
       }
     ]);
@@ -1360,6 +1370,154 @@ describe("TokenCollectorService", () => {
         provider: "codex",
         toolName: "rg",
         callCount: 1
+      }
+    ]);
+  });
+
+  it("recalculates tool attribution when only the attribution parse version changes", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexAttributedToolRollout(fixture.rolloutPath, fixture.rootDir, 30);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    const usageBefore = readRolloutUsageSummary(fixture.config.monitorDbPath, fixture.rolloutPath);
+    overwriteToolAttributionTokens(fixture.config.monitorDbPath, fixture.rolloutPath, {
+      inputTokens: 999,
+      outputTokens: 999
+    });
+
+    vi.stubEnv("HARNESS_MONITOR_TOKEN_ATTRIBUTION_PARSE_VERSION", "2");
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(0);
+    expect(readRolloutUsageSummary(fixture.config.monitorDbPath, fixture.rolloutPath)).toEqual(usageBefore);
+    expect(readToolAttributionTokenRows(fixture.config.monitorDbPath)).toEqual([
+      {
+        rollout_path: fixture.rolloutPath,
+        provider: "codex",
+        tool_name: "rg",
+        call_count: 1,
+        attributed_input_tokens: 30,
+        attributed_output_tokens: 45
+      }
+    ]);
+    expect(readTokenAttributionParseVersion(fixture.config.monitorDbPath, fixture.rolloutPath)).toBe("2");
+  });
+
+  it("deduplicates repeated tool attribution by key before writing", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexRepeatedAttributedToolRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    expect(readToolAttributionTokenRows(fixture.config.monitorDbPath)).toEqual([
+      {
+        rollout_path: fixture.rolloutPath,
+        provider: "codex",
+        tool_name: "rg",
+        call_count: 2,
+        attributed_input_tokens: 30,
+        attributed_output_tokens: 2
+      }
+    ]);
+  });
+
+  it("promotes rollouts stale for break and attribution parsing to a full reindex", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexAttributedToolRollout(fixture.rolloutPath, fixture.rootDir, 30);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    overwriteToolAttributionTokens(fixture.config.monitorDbPath, fixture.rolloutPath, {
+      inputTokens: 999,
+      outputTokens: 999
+    });
+    markBreakParseVersionStaleWithoutChangingRolloutState(fixture.config.monitorDbPath, fixture.rolloutPath);
+    markAttributionParseVersionStaleWithoutChangingRolloutState(fixture.config.monitorDbPath, fixture.rolloutPath);
+
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(1);
+    expect(readBreakParseVersion(fixture.config.monitorDbPath, fixture.rolloutPath)).toBe(BREAK_PARSE_VERSION);
+    expect(readTokenAttributionParseVersion(fixture.config.monitorDbPath, fixture.rolloutPath)).toBe(TOKEN_ATTRIBUTION_PARSE_VERSION);
+    expect(readToolAttributionTokenRows(fixture.config.monitorDbPath)).toEqual([
+      {
+        rollout_path: fixture.rolloutPath,
+        provider: "codex",
+        tool_name: "rg",
+        call_count: 1,
+        attributed_input_tokens: 30,
+        attributed_output_tokens: 45
+      }
+    ]);
+  });
+
+  it("refreshes tool attribution as part of a rollout parse-version reindex", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexAttributedToolRollout(fixture.rolloutPath, fixture.rootDir, 30);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    overwriteToolAttributionTokens(fixture.config.monitorDbPath, fixture.rolloutPath, {
+      inputTokens: 999,
+      outputTokens: 999
+    });
+    markRolloutParseVersionStale(fixture.config.monitorDbPath, fixture.rolloutPath);
+
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(1);
+    expect(readToolAttributionTokenRows(fixture.config.monitorDbPath)).toEqual([
+      {
+        rollout_path: fixture.rolloutPath,
+        provider: "codex",
+        tool_name: "rg",
+        call_count: 1,
+        attributed_input_tokens: 30,
+        attributed_output_tokens: 45
+      }
+    ]);
+    expect(readTokenAttributionParseVersion(fixture.config.monitorDbPath, fixture.rolloutPath)).toBe(TOKEN_ATTRIBUTION_PARSE_VERSION);
+  });
+
+  it("tracks attribution parse state for zero-attribution rollouts", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexNoCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    expect(readToolAttributionTokenRows(fixture.config.monitorDbPath)).toEqual([]);
+    expect(readTokenAttributionParseVersion(fixture.config.monitorDbPath, fixture.rolloutPath)).toBe(TOKEN_ATTRIBUTION_PARSE_VERSION);
+
+    writeCodexAttributedToolRollout(fixture.rolloutPath, fixture.rootDir, 42);
+    markAttributionParseVersionStaleWithoutChangingRolloutState(fixture.config.monitorDbPath, fixture.rolloutPath);
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(0);
+    expect(readToolAttributionTokenRows(fixture.config.monitorDbPath)).toEqual([
+      {
+        rollout_path: fixture.rolloutPath,
+        provider: "codex",
+        tool_name: "rg",
+        call_count: 1,
+        attributed_input_tokens: 42,
+        attributed_output_tokens: 45
       }
     ]);
   });
@@ -2123,6 +2281,148 @@ function writeCodexNoCacheBreakRollout(rolloutPath: string, rootDir: string): vo
   });
 }
 
+function writeCodexAttributedToolRollout(rolloutPath: string, rootDir: string, originalTokenCount: number): void {
+  const cwd = path.join(rootDir, "workspace", "demo-project", "packages", "client");
+  const toolOutputBody = "x".repeat(180);
+  const lines: Array<Record<string, unknown>> = [
+    {
+      timestamp: "2026-03-14T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        cwd,
+        cli_version: "0.114.0",
+        model_provider: "openai"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:01.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: "rg token-attribution" }),
+        call_id: "call-attribution"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:02.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-attribution",
+        output: `Original token count: ${originalTokenCount}\n${toolOutputBody}`
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:03.000Z",
+      type: "turn_context",
+      payload: {
+        cwd,
+        model: "gpt-5.4"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:04.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 20,
+            output_tokens: 40,
+            total_tokens: 140
+          },
+          last_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 20,
+            output_tokens: 40,
+            total_tokens: 140
+          }
+        }
+      }
+    }
+  ];
+
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
+function writeCodexRepeatedAttributedToolRollout(rolloutPath: string, rootDir: string): void {
+  const cwd = path.join(rootDir, "workspace", "demo-project", "packages", "client");
+  const lines: Array<Record<string, unknown>> = [
+    {
+      timestamp: "2026-03-14T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        cwd,
+        cli_version: "0.114.0",
+        model_provider: "openai"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:01.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: "rg first" }),
+        call_id: "call-attribution-1"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:02.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-attribution-1",
+        output: "Original token count: 10\nabcd"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:03.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: "rg second" }),
+        call_id: "call-attribution-2"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:04.000Z",
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call-attribution-2",
+        output: "Original token count: 20\nabcd"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:05.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 20,
+            output_tokens: 40,
+            total_tokens: 140
+          },
+          last_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 20,
+            output_tokens: 40,
+            total_tokens: 140
+          }
+        }
+      }
+    }
+  ];
+
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
 function writeCodexIdleGapCacheDropRollout(rolloutPath: string, rootDir: string, secondTimestamp: string): void {
   writeCodexTwoTurnRollout(rolloutPath, rootDir, {
     firstTimestamp: "2026-03-14T10:00:02.000Z",
@@ -2478,6 +2778,19 @@ function markBreakParseVersionStaleWithoutChangingRolloutState(monitorDbPath: st
   database.close();
 }
 
+function markAttributionParseVersionStaleWithoutChangingRolloutState(monitorDbPath: string, rolloutPath: string): void {
+  const stats = fs.statSync(rolloutPath);
+  const database = new DatabaseSync(monitorDbPath);
+  database.prepare(`
+    UPDATE rollout_index_state
+    SET file_size = ?,
+        mtime_ms = ?,
+        token_attribution_parse_version = ?
+    WHERE rollout_path = ?
+  `).run(stats.size, Math.trunc(stats.mtimeMs), "token-attribution-v0", rolloutPath);
+  database.close();
+}
+
 function readRolloutUsageSummary(monitorDbPath: string, rolloutPath: string): {
   rowCount: number;
   totalTokens: number;
@@ -2501,6 +2814,77 @@ function readRolloutUsageSummary(monitorDbPath: string, rolloutPath: string): {
   };
   database.close();
   return row;
+}
+
+function readTokenAttributionParseVersion(monitorDbPath: string, rolloutPath: string): string | null {
+  const database = new DatabaseSync(monitorDbPath);
+  const row = database.prepare(`
+    SELECT token_attribution_parse_version
+    FROM rollout_index_state
+    WHERE rollout_path = ?
+  `).get(rolloutPath) as { token_attribution_parse_version: string } | undefined;
+  database.close();
+  return row?.token_attribution_parse_version ?? null;
+}
+
+function readBreakParseVersion(monitorDbPath: string, rolloutPath: string): string | null {
+  const database = new DatabaseSync(monitorDbPath);
+  const row = database.prepare(`
+    SELECT break_parse_version
+    FROM rollout_index_state
+    WHERE rollout_path = ?
+  `).get(rolloutPath) as { break_parse_version: string } | undefined;
+  database.close();
+  return row?.break_parse_version ?? null;
+}
+
+function overwriteToolAttributionTokens(
+  monitorDbPath: string,
+  rolloutPath: string,
+  input: {
+    inputTokens: number;
+    outputTokens: number;
+  }
+): void {
+  const database = new DatabaseSync(monitorDbPath);
+  database.prepare(`
+    UPDATE tool_token_attribution
+    SET attributed_input_tokens = ?,
+        attributed_output_tokens = ?
+    WHERE rollout_path = ?
+  `).run(input.inputTokens, input.outputTokens, rolloutPath);
+  database.close();
+}
+
+function readToolAttributionTokenRows(monitorDbPath: string): Array<{
+  rollout_path: string;
+  provider: string;
+  tool_name: string;
+  call_count: number;
+  attributed_input_tokens: number | null;
+  attributed_output_tokens: number | null;
+}> {
+  const database = new DatabaseSync(monitorDbPath);
+  const rows = database.prepare(`
+    SELECT
+      rollout_path,
+      provider,
+      tool_name,
+      call_count,
+      attributed_input_tokens,
+      attributed_output_tokens
+    FROM tool_token_attribution
+    ORDER BY rollout_path, provider, tool_name
+  `).all() as Array<{
+    rollout_path: string;
+    provider: string;
+    tool_name: string;
+    call_count: number;
+    attributed_input_tokens: number | null;
+    attributed_output_tokens: number | null;
+  }>;
+  database.close();
+  return rows;
 }
 
 function readToolAttributionRows(monitorDbPath: string): Array<{

@@ -27,6 +27,8 @@
   --provider-agents-soft: #2b8a5e;
   --provider-agents-bg: rgba(67, 211, 146, 0.08);
   --provider-agents-border: rgba(67, 211, 146, 0.24);
+  --tool-token-input: rgba(84, 210, 255, 0.28);
+  --tool-token-output: #54d2ff;
   --success: #43d392;
   --warning: #ffb454;
   --danger: #ff6b6b;
@@ -442,7 +444,9 @@ pre {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+  flex: 1 1 320px;
   gap: 10px;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -464,8 +468,10 @@ pre {
 }
 
 .panel-title p {
+  min-width: 0;
   margin: 0;
   font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .panel-actions,
@@ -933,6 +939,249 @@ pre {
 .tool-usage-empty strong {
   color: var(--text-soft);
   font-size: 0.9rem;
+}
+
+.tools-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.tools-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tools-filter-label {
+  color: var(--text-dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.tools-attribution-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+.tool-attribution-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.tool-attribution-canvas {
+  min-width: 760px;
+}
+
+.token-attribution-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.token-attribution-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.token-attribution-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.token-attribution-legend .input-swatch {
+  background: var(--tool-token-input);
+}
+
+.token-attribution-legend .output-swatch {
+  background: var(--tool-token-output);
+}
+
+.subagent-attribution-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+.subagent-attribution-summary,
+.subagent-top-list {
+  min-width: 0;
+}
+
+.subagent-attribution-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.subagent-attribution-note {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.subagent-stack-bar {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.subagent-stack-bar span {
+  min-width: 0;
+}
+
+.subagent-stack-bar .root-segment {
+  background: var(--accent-soft);
+}
+
+.subagent-stack-bar .subagent-segment {
+  background: var(--provider-agents);
+}
+
+.subagent-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.subagent-attribution-summary .subagent-summary-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+  box-shadow: none;
+}
+
+.subagent-attribution-summary .subagent-summary-card span,
+.subagent-attribution-summary .subagent-summary-card p,
+.subagent-attribution-row p,
+.subagent-attribution-value span {
+  color: var(--text-soft);
+  font-size: 0.74rem;
+}
+
+.subagent-attribution-summary .subagent-summary-card strong,
+.subagent-attribution-value strong {
+  overflow-wrap: anywhere;
+}
+
+.subagent-attribution-summary .subagent-summary-card p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.subagent-top-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.subagent-attribution-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.subagent-attribution-row:last-child {
+  border-bottom: 0;
+}
+
+.subagent-attribution-main,
+.subagent-attribution-value {
+  min-width: 0;
+}
+
+.subagent-attribution-main {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.subagent-attribution-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.subagent-attribution-title strong {
+  overflow-wrap: anywhere;
+}
+
+.subagent-attribution-row p {
+  margin: 0;
+}
+
+.subagent-attribution-value {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.attribution-estimated-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid var(--provider-codex-border);
+  border-radius: 999px;
+  background: var(--provider-codex-bg);
+  color: var(--provider-codex);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  line-height: 1.1;
+}
+
+.subagent-attribution-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 124px;
+  border: 1px dashed rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  text-align: center;
 }
 
 .icon-button {
@@ -2716,6 +2965,11 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .tools-attribution-grid,
+  .subagent-attribution-layout {
+    grid-template-columns: 1fr;
+  }
+
   .cache-break-side-panel {
     padding-top: 14px;
     padding-left: 0;
@@ -3019,6 +3273,28 @@ pre {
 
   .tool-usage-canvas {
     min-width: 680px;
+  }
+
+  .tool-attribution-canvas {
+    min-width: 680px;
+  }
+
+  .tools-filter-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .subagent-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subagent-attribution-row {
+    flex-direction: column;
+  }
+
+  .subagent-attribution-value {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .modal-backdrop {

@@ -1,0 +1,28 @@
+{
+  "source": {
+    "provider": "codex",
+    "path": "/Users/example/.codex/sessions/2026/04/25/rollout-example.jsonl",
+    "line": 2050,
+    "sanitized": true,
+    "notes": "Extracted from a Codex function_call_output without an Original token count label. Session IDs and wording are generalized."
+  },
+  "turn": {
+    "timestamp": "2026-04-25T23:45:48.000Z",
+    "type": "response_item",
+    "payload": {
+      "type": "function_call",
+      "name": "write_stdin",
+      "arguments": "{\"session_id\":1,\"chars\":\"placeholder input\"}",
+      "call_id": "call_example_no_label"
+    }
+  },
+  "functionCallOutput": {
+    "timestamp": "2026-04-25T23:45:48.680Z",
+    "type": "response_item",
+    "payload": {
+      "type": "function_call_output",
+      "call_id": "call_example_no_label",
+      "output": "write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+    }
+  }
+}

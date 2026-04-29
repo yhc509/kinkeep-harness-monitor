@@ -12,6 +12,7 @@ import {
   loadSessionsPage,
   loadSkillsPage,
   loadTokensPage,
+  loadToolsPage,
   prefetchAllRoutes
 } from "./route-prefetch";
 
@@ -22,6 +23,7 @@ const McpPage = lazy(async () => loadMcpPage().then((module) => ({ default: modu
 const HooksPage = lazy(async () => loadHooksPage().then((module) => ({ default: module.HooksPage })));
 const SkillsPage = lazy(async () => loadSkillsPage().then((module) => ({ default: module.SkillsPage })));
 const TokensPage = lazy(async () => loadTokensPage().then((module) => ({ default: module.TokensPage })));
+const ToolsPage = lazy(async () => loadToolsPage().then((module) => ({ default: module.ToolsPage })));
 const CachePage = lazy(async () => loadCachePage().then((module) => ({ default: module.CachePage })));
 
 export function App() {
@@ -76,6 +78,7 @@ export function App() {
           <Route path="/hooks" element={<HooksPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
+          <Route path="/tools" element={<ToolsPage />} />
           <Route path="/cache" element={<CachePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

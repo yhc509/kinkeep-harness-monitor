@@ -6,6 +6,7 @@ const routeLoaders = {
   hooks: () => import("./pages/HooksPage"),
   skills: () => import("./pages/SkillsPage"),
   tokens: () => import("./pages/TokensPage"),
+  tools: () => import("./pages/ToolsPage"),
   cache: () => import("./pages/CachePage")
 };
 
@@ -35,6 +36,10 @@ export function loadSkillsPage() {
 
 export function loadTokensPage() {
   return routeLoaders.tokens();
+}
+
+export function loadToolsPage() {
+  return routeLoaders.tools();
 }
 
 export function loadCachePage() {
@@ -70,6 +75,10 @@ export function prefetchRoute(pathname: string) {
     return routeLoaders.tokens();
   }
 
+  if (pathname.startsWith("/tools")) {
+    return routeLoaders.tools();
+  }
+
   if (pathname.startsWith("/cache")) {
     return routeLoaders.cache();
   }
@@ -85,6 +94,7 @@ export function prefetchAllRoutes() {
     routeLoaders.hooks(),
     routeLoaders.skills(),
     routeLoaders.tokens(),
+    routeLoaders.tools(),
     routeLoaders.cache()
   ]);
 }

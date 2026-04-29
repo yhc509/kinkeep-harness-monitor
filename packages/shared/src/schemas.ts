@@ -218,6 +218,46 @@ export const toolUsageEntrySchema = z.object({
   callCount: z.number()
 });
 
+export const toolAttributionEntrySchema = z.object({
+  toolName: z.string(),
+  provider: providerSchema,
+  callCount: z.number(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  estimated: z.boolean()
+});
+
+export const toolAttributionResponseSchema = z.object({
+  tools: z.array(toolAttributionEntrySchema)
+});
+
+export const subagentAttributionSummarySchema = z.object({
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  totalTokens: z.number()
+});
+
+export const subagentAttributionEntrySchema = z.object({
+  sessionId: z.string(),
+  parentSessionId: z.string().nullable(),
+  provider: providerSchema,
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  totalTokens: z.number(),
+  estimated: z.boolean()
+});
+
+export const subagentAttributionResponseSchema = z.object({
+  root: subagentAttributionSummarySchema,
+  subagents: z.array(subagentAttributionEntrySchema),
+  notes: z.array(z.string())
+});
+
+export const ToolAttributionEntrySchema = toolAttributionEntrySchema;
+export const ToolAttributionResponseSchema = toolAttributionResponseSchema;
+export const SubagentAttributionEntrySchema = subagentAttributionEntrySchema;
+export const SubagentAttributionResponseSchema = subagentAttributionResponseSchema;
+
 export const tokenPatternsSchema = z.object({
   dowHourHeatmap: z.array(z.object({
     dow: z.number().int().min(0).max(6),
@@ -401,6 +441,10 @@ export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;
 export type ProjectTokenUsageItem = z.infer<typeof projectTokenUsageItemSchema>;
 export type ModelTokenUsageItem = z.infer<typeof modelTokenUsageItemSchema>;
 export type ToolUsageEntry = z.infer<typeof toolUsageEntrySchema>;
+export type ToolAttributionEntry = z.infer<typeof toolAttributionEntrySchema>;
+export type ToolAttributionResponse = z.infer<typeof toolAttributionResponseSchema>;
+export type SubagentAttributionEntry = z.infer<typeof subagentAttributionEntrySchema>;
+export type SubagentAttributionResponse = z.infer<typeof subagentAttributionResponseSchema>;
 export type TokenPatterns = z.infer<typeof tokenPatternsSchema>;
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 export type MemoryEntry = z.infer<typeof memoryEntrySchema>;

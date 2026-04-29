@@ -39,6 +39,7 @@ import {
 import { extractClaudeToolName, extractCodexToolNames } from "./cmd-normalize";
 import { detectCacheBreak } from "./cache-break-detector";
 import type { BreakDetectionResult, TurnSnapshot } from "./cache-break-types";
+import { computeClaudeAttribution, computeCodexAttribution } from "./tool-attribution-collector";
 import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
@@ -48,6 +49,8 @@ const TOOL_PARSE_VERSION = 1;
 const ROLLOUT_PARSE_VERSION = `${CACHE_PARSE_VERSION}:tool-${TOOL_PARSE_VERSION}`;
 export const BREAK_PARSE_VERSION = "1";
 const BREAK_PARSE_VERSION_TEST_ENV = "HARNESS_MONITOR_BREAK_PARSE_VERSION";
+export const TOKEN_ATTRIBUTION_PARSE_VERSION = "1";
+const TOKEN_ATTRIBUTION_PARSE_VERSION_TEST_ENV = "HARNESS_MONITOR_TOKEN_ATTRIBUTION_PARSE_VERSION";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
 const CACHE_BREAK_IDLE_RESET_MS = 24 * 60 * 60 * 1000;
@@ -93,6 +96,7 @@ interface RolloutIndexStateRow {
   indexed_at: string;
   parse_version: string;
   break_parse_version: string;
+  token_attribution_parse_version: string;
 }
 
 interface RolloutFileState {
@@ -105,6 +109,7 @@ interface SyncPreparation {
   totalRollouts: number;
   changedFiles: RolloutFileState[];
   breakOnlyFiles: RolloutFileState[];
+  attributionOnlyFiles: RolloutFileState[];
   deletedPaths: string[];
   truncateToolUsage: boolean;
   hasCache: boolean;
@@ -220,6 +225,8 @@ interface ToolUsageAccumulator {
   provider: ToolUsageEntry["provider"];
   toolName: string;
   callCount: number;
+  attributedInputTokens: number;
+  attributedOutputTokens: number;
 }
 
 type CacheUsageProvider = "codex" | "claude_code";
@@ -358,7 +365,8 @@ export class TokenCollectorService {
         mtime_ms INTEGER NOT NULL,
         indexed_at TEXT NOT NULL,
         parse_version TEXT NOT NULL,
-        break_parse_version TEXT NOT NULL DEFAULT ''
+        break_parse_version TEXT NOT NULL DEFAULT '',
+        token_attribution_parse_version TEXT NOT NULL DEFAULT ''
       );
 
       CREATE TABLE IF NOT EXISTS cache_break_event (
@@ -387,10 +395,6 @@ export class TokenCollectorService {
         attributed_output_tokens INTEGER,
         PRIMARY KEY (rollout_path, hour_bucket, provider, tool_name)
       );
-      DROP INDEX IF EXISTS idx_tta_provider_tool;
-      DROP INDEX IF EXISTS idx_tta_hour_bucket;
-      CREATE INDEX IF NOT EXISTS idx_tta_provider_hour_tool
-        ON tool_token_attribution(provider, hour_bucket, tool_name);
 
       CREATE TABLE IF NOT EXISTS collector_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -410,6 +414,7 @@ export class TokenCollectorService {
     ensureColumn(database, "rollout_hourly_usage", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_usage", "uncached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_index_state", "break_parse_version", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_index_state", "token_attribution_parse_version", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "cache_break_event", "local_date", "TEXT NOT NULL DEFAULT ''");
     // Existing rows are not backfilled; break_parse_version mismatch reprocesses them.
     ensureColumn(database, "rollout_hourly_model_usage", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
@@ -425,6 +430,10 @@ export class TokenCollectorService {
         ON cache_break_event(provider, ts);
       CREATE INDEX IF NOT EXISTS idx_cache_break_provider_local_date
         ON cache_break_event(provider, local_date);
+      DROP INDEX IF EXISTS idx_tta_provider_tool;
+      DROP INDEX IF EXISTS idx_tta_hour_bucket;
+      CREATE INDEX IF NOT EXISTS idx_tta_provider_hour_tool
+        ON tool_token_attribution(provider, hour_bucket, tool_name);
     `);
     database.close();
   }
@@ -536,15 +545,17 @@ export class TokenCollectorService {
           mtime_ms,
           indexed_at,
           parse_version,
-          break_parse_version
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          break_parse_version,
+          token_attribution_parse_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         CLAUDE_CODE_STATS_ROLLOUT_PATH,
         stats.size,
         Math.trunc(stats.mtimeMs),
         toLocalDateTime(new Date()) ?? "",
         CLAUDE_CODE_STATS_PARSE_VERSION,
-        getBreakParseVersion()
+        getBreakParseVersion(),
+        getTokenAttributionParseVersion()
       );
 
       database.exec("COMMIT");
@@ -882,6 +893,7 @@ export class TokenCollectorService {
         WHERE provider = ?
           AND hour_bucket >= ?
         GROUP BY provider, tool_name
+        HAVING SUM(call_count) > 0
         ORDER BY call_count DESC, tool_name ASC
         LIMIT 50
       `).all(provider, startHourBucket) as unknown as ToolUsageRow[];
@@ -1106,8 +1118,19 @@ export class TokenCollectorService {
         AND rollout_path != ?
       LIMIT 1
     `).get(getBreakParseVersion(), CLAUDE_CODE_STATS_ROLLOUT_PATH) as { has_stale_cache: number } | undefined;
+    const staleAttributionRow = database.prepare(`
+      SELECT 1 AS has_stale_cache
+      FROM rollout_index_state
+      WHERE token_attribution_parse_version != ?
+        AND rollout_path != ?
+      LIMIT 1
+    `).get(getTokenAttributionParseVersion(), CLAUDE_CODE_STATS_ROLLOUT_PATH) as { has_stale_cache: number } | undefined;
     database.close();
-    return Boolean(staleRolloutRow?.has_stale_cache || staleBreakRow?.has_stale_cache);
+    return Boolean(
+      staleRolloutRow?.has_stale_cache
+      || staleBreakRow?.has_stale_cache
+      || staleAttributionRow?.has_stale_cache
+    );
   }
 
   private prepareSyncState(): SyncPreparation {
@@ -1123,7 +1146,8 @@ export class TokenCollectorService {
         mtime_ms,
         indexed_at,
         parse_version,
-        break_parse_version
+        break_parse_version,
+        token_attribution_parse_version
       FROM rollout_index_state
     `).all() as unknown as RolloutIndexStateRow[];
     const usageCount = database.prepare(`
@@ -1148,6 +1172,12 @@ export class TokenCollectorService {
       WHERE break_parse_version != ?
         AND rollout_path != ?
     `).all(getBreakParseVersion(), CLAUDE_CODE_STATS_ROLLOUT_PATH) as unknown as RolloutPathRow[];
+    const staleAttributionRows = database.prepare(`
+      SELECT rollout_path
+      FROM rollout_index_state
+      WHERE token_attribution_parse_version != ?
+        AND rollout_path != ?
+    `).all(getTokenAttributionParseVersion(), CLAUDE_CODE_STATS_ROLLOUT_PATH) as unknown as RolloutPathRow[];
     database.close();
 
     const indexedMap = new Map(indexedRows.map((row) => [row.rollout_path, row]));
@@ -1175,8 +1205,26 @@ export class TokenCollectorService {
         changedFiles.push(file);
       }
     }
+    const staleBreakPaths = new Set(staleBreakRows.map((row) => row.rollout_path));
+    const staleAttributionPaths = new Set(staleAttributionRows.map((row) => row.rollout_path));
     const changedFilePaths = new Set(changedFiles.map((file) => file.rolloutPath));
+    for (const rolloutPath of staleBreakPaths) {
+      if (!staleAttributionPaths.has(rolloutPath) || changedFilePaths.has(rolloutPath)) {
+        continue;
+      }
+
+      const file = filesByPath.get(rolloutPath);
+      if (file) {
+        changedFiles.push(file);
+        changedFilePaths.add(rolloutPath);
+      }
+    }
+
     const breakOnlyFiles = staleBreakRows
+      .map((row) => filesByPath.get(row.rollout_path))
+      .filter((file): file is RolloutFileState => file !== undefined)
+      .filter((file) => !changedFilePaths.has(file.rolloutPath));
+    const attributionOnlyFiles = staleAttributionRows
       .map((row) => filesByPath.get(row.rollout_path))
       .filter((file): file is RolloutFileState => file !== undefined)
       .filter((file) => !changedFilePaths.has(file.rolloutPath));
@@ -1192,6 +1240,7 @@ export class TokenCollectorService {
       totalRollouts: files.length,
       changedFiles,
       breakOnlyFiles,
+      attributionOnlyFiles,
       deletedPaths: [...new Set([...deletedPaths, ...staleSyntheticPaths])],
       truncateToolUsage,
       hasCache: (
@@ -1207,6 +1256,7 @@ export class TokenCollectorService {
   private syncUsageCache(now: Date, preparation: SyncPreparation): SnapshotResult {
     const startedAt = toLocalDateTime(now) ?? "";
     const breakParseVersion = getBreakParseVersion();
+    const tokenAttributionParseVersion = getTokenAttributionParseVersion();
     const database = this.openMonitorDb();
 
     try {
@@ -1301,10 +1351,14 @@ export class TokenCollectorService {
             hour_bucket,
             provider,
             tool_name,
-            call_count
-          ) VALUES (?, ?, ?, ?, ?)
+            call_count,
+            attributed_input_tokens,
+            attributed_output_tokens
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(rollout_path, hour_bucket, provider, tool_name) DO UPDATE SET
-            call_count = excluded.call_count
+            call_count = excluded.call_count,
+            attributed_input_tokens = excluded.attributed_input_tokens,
+            attributed_output_tokens = excluded.attributed_output_tokens
         `);
         const project = parsed.project ?? createUnknownProjectInfo();
 
@@ -1351,7 +1405,9 @@ export class TokenCollectorService {
             toolUsage.hourBucket,
             toolUsage.provider,
             toolUsage.toolName,
-            toolUsage.callCount
+            toolUsage.callCount,
+            toolUsage.attributedInputTokens,
+            toolUsage.attributedOutputTokens
           );
         }
         insertCacheBreakEvents(insertCacheBreakEvent, file.rolloutPath, parsed.cacheBreakEvents, breakParseVersion);
@@ -1363,21 +1419,24 @@ export class TokenCollectorService {
             mtime_ms,
             indexed_at,
             parse_version,
-            break_parse_version
-          ) VALUES (?, ?, ?, ?, ?, ?)
+            break_parse_version,
+            token_attribution_parse_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(rollout_path) DO UPDATE SET
             file_size = excluded.file_size,
             mtime_ms = excluded.mtime_ms,
             indexed_at = excluded.indexed_at,
             parse_version = excluded.parse_version,
-            break_parse_version = excluded.break_parse_version
+            break_parse_version = excluded.break_parse_version,
+            token_attribution_parse_version = excluded.token_attribution_parse_version
         `).run(
           file.rolloutPath,
           file.fileSize,
           file.mtimeMs,
           toLocalDateTime(new Date()) ?? "",
           ROLLOUT_PARSE_VERSION,
-          breakParseVersion
+          breakParseVersion,
+          tokenAttributionParseVersion
         );
 
         stats.updatedRollouts += 1;
@@ -1397,6 +1456,48 @@ export class TokenCollectorService {
           SET break_parse_version = ?
           WHERE rollout_path = ?
         `).run(breakParseVersion, file.rolloutPath);
+      }
+
+      for (const file of preparation.attributionOnlyFiles) {
+        const provider = this.findProviderForPath(file.rolloutPath);
+        const parsed = isClaudeCodeSessionProvider(provider)
+          ? parseClaudeCodeTranscriptUsage(file.rolloutPath, provider)
+          : parseRolloutUsage(file.rolloutPath, provider);
+        database.prepare(`DELETE FROM tool_token_attribution WHERE rollout_path = ?`).run(file.rolloutPath);
+
+        const upsertToolUsage = database.prepare(`
+          INSERT INTO tool_token_attribution (
+            rollout_path,
+            hour_bucket,
+            provider,
+            tool_name,
+            call_count,
+            attributed_input_tokens,
+            attributed_output_tokens
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(rollout_path, hour_bucket, provider, tool_name) DO UPDATE SET
+            call_count = excluded.call_count,
+            attributed_input_tokens = excluded.attributed_input_tokens,
+            attributed_output_tokens = excluded.attributed_output_tokens
+        `);
+
+        for (const toolUsage of parsed.hourlyToolUsage.values()) {
+          upsertToolUsage.run(
+            file.rolloutPath,
+            toolUsage.hourBucket,
+            toolUsage.provider,
+            toolUsage.toolName,
+            toolUsage.callCount,
+            toolUsage.attributedInputTokens,
+            toolUsage.attributedOutputTokens
+          );
+        }
+
+        database.prepare(`
+          UPDATE rollout_index_state
+          SET token_attribution_parse_version = ?
+          WHERE rollout_path = ?
+        `).run(tokenAttributionParseVersion, file.rolloutPath);
       }
 
       database.exec("COMMIT");
@@ -1682,6 +1783,17 @@ function getBreakParseVersion(): string {
   return BREAK_PARSE_VERSION;
 }
 
+export function getTokenAttributionParseVersion(): string {
+  if (process.env.NODE_ENV === "test") {
+    const override = process.env[TOKEN_ATTRIBUTION_PARSE_VERSION_TEST_ENV]?.trim();
+    if (override) {
+      return override;
+    }
+  }
+
+  return TOKEN_ATTRIBUTION_PARSE_VERSION;
+}
+
 function insertCacheBreakEvents(
   insertStatement: ReturnType<DatabaseSync["prepare"]>,
   rolloutPath: string,
@@ -1723,6 +1835,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
   let tokenEvents = 0;
   let previousTotals: ParsedUsageBlock = emptyParsedUsage();
   const usageProvider = getCacheUsageProvider(sessionLogProvider);
+  const pendingCodexFunctionCalls = new Map<string, { turn: unknown; toolNames: string[] }>();
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -1771,17 +1884,60 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     }
 
     if (parsed.type !== "event_msg") {
-      if (parsed.type === "response_item" && payload.type === "function_call" && payload.name === "exec_command") {
+      if (parsed.type === "response_item" && payload.type === "function_call") {
+        const rawToolName = typeof payload.name === "string" ? payload.name.trim() : "";
+        const extractedToolNames = rawToolName === "exec_command"
+          ? extractCodexExecCommands(payload.arguments).flatMap(extractCodexToolNames)
+          : [];
+        const attributionToolNames = extractedToolNames.length > 0
+          ? extractedToolNames
+          : rawToolName
+            ? [rawToolName]
+            : [];
+        const callId = readOptionalString(payload, "call_id");
+
         const rawTimestamp = readLineTimestamp(parsed, payload);
         if (rawTimestamp) {
           const timestamp = new Date(rawTimestamp);
           if (!Number.isNaN(timestamp.getTime())) {
             const hourBucket = formatHourBucket(timestamp);
-            for (const cmd of extractCodexExecCommands(payload.arguments)) {
-              for (const toolName of extractCodexToolNames(cmd)) {
-                addToolUsage(hourlyToolUsage, hourBucket, "codex", toolName);
-              }
+            for (const toolName of attributionToolNames) {
+              addToolUsage(hourlyToolUsage, hourBucket, "codex", toolName);
             }
+          }
+        }
+
+        if (callId && attributionToolNames.length > 0) {
+          pendingCodexFunctionCalls.set(callId, {
+            turn: parsed,
+            toolNames: attributionToolNames
+          });
+        }
+      }
+
+      if (parsed.type === "response_item" && payload.type === "function_call_output") {
+        const callId = readOptionalString(payload, "call_id");
+        const pendingFunctionCall = callId ? pendingCodexFunctionCalls.get(callId) : undefined;
+        const attribution = pendingFunctionCall
+          ? computeCodexAttribution(pendingFunctionCall.turn, parsed)
+          : null;
+        const rawTimestamp = readLineTimestamp(parsed, payload);
+
+        if (callId) {
+          pendingCodexFunctionCalls.delete(callId);
+        }
+
+        if (attribution && rawTimestamp) {
+          const timestamp = new Date(rawTimestamp);
+          if (!Number.isNaN(timestamp.getTime())) {
+            addSplitToolAttribution(
+              hourlyToolUsage,
+              formatHourBucket(timestamp),
+              "codex",
+              pendingFunctionCall?.toolNames ?? [attribution.toolName],
+              attribution.inputTokens,
+              attribution.outputTokens
+            );
           }
         }
       }
@@ -1894,6 +2050,8 @@ function parseClaudeCodeTranscriptUsage(
   let cacheBreakTurnIndex = 0;
   let tokenEvents = 0;
   const usageProvider = getCacheUsageProvider(sessionLogProvider);
+  let pendingClaudeToolTurn: Record<string, unknown> | null = null;
+  let pendingClaudeResultTurn: Record<string, unknown> | null = null;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -1922,6 +2080,29 @@ function parseClaudeCodeTranscriptUsage(
       if (cwd) {
         project = resolveProjectInfoFromCwd(cwd);
       }
+      if (pendingClaudeToolTurn && hasClaudeToolResult(parsed)) {
+        const message = isRecord(parsed.message) ? parsed.message : {};
+        const usage = isRecord(message.usage) ? message.usage : null;
+        const rawTimestamp = readOptionalString(parsed, "timestamp");
+        const timestamp = rawTimestamp ? new Date(rawTimestamp) : null;
+
+        if (usage && timestamp && !Number.isNaN(timestamp.getTime())) {
+          for (const attribution of computeClaudeAttribution(pendingClaudeToolTurn, parsed)) {
+            addToolAttribution(
+              hourlyToolUsage,
+              formatHourBucket(timestamp),
+              "claude-code",
+              attribution.toolName,
+              attribution.inputTokens,
+              attribution.outputTokens
+            );
+          }
+          pendingClaudeToolTurn = null;
+          pendingClaudeResultTurn = null;
+        } else {
+          pendingClaudeResultTurn = parsed;
+        }
+      }
       continue;
     }
 
@@ -1936,6 +2117,32 @@ function parseClaudeCodeTranscriptUsage(
 
     const rawTimestamp = readOptionalString(parsed, "timestamp");
     const timestamp = rawTimestamp ? new Date(rawTimestamp) : null;
+    const usage = isRecord(message.usage) ? message.usage : null;
+
+    if (
+      pendingClaudeToolTurn
+      && pendingClaudeResultTurn
+      && usage
+      && timestamp
+      && !Number.isNaN(timestamp.getTime())
+    ) {
+      for (const attribution of computeClaudeAttribution(
+        pendingClaudeToolTurn,
+        createClaudeAttributionTurn(pendingClaudeResultTurn, parsed)
+      )) {
+        addToolAttribution(
+          hourlyToolUsage,
+          formatHourBucket(timestamp),
+          "claude-code",
+          attribution.toolName,
+          attribution.inputTokens,
+          attribution.outputTokens
+        );
+      }
+      pendingClaudeToolTurn = null;
+      pendingClaudeResultTurn = null;
+    }
+
     if (timestamp && !Number.isNaN(timestamp.getTime())) {
       const hourBucket = formatHourBucket(timestamp);
       const content = Array.isArray(message.content) ? message.content : [];
@@ -1948,7 +2155,6 @@ function parseClaudeCodeTranscriptUsage(
       }
     }
 
-    const usage = isRecord(message.usage) ? message.usage : null;
     if (!usage) {
       continue;
     }
@@ -2024,6 +2230,11 @@ function parseClaudeCodeTranscriptUsage(
     });
     if (turnSnapshot) {
       previousCacheBreakTurn = collectCacheBreakEvent(cacheBreakEvents, previousCacheBreakTurn, turnSnapshot);
+    }
+
+    if (hasClaudeToolUse(parsed)) {
+      pendingClaudeToolTurn = parsed;
+      pendingClaudeResultTurn = null;
     }
   }
 
@@ -2208,10 +2419,77 @@ function addToolUsage(
     hourBucket,
     provider,
     toolName: normalizedToolName,
-    callCount: 0
+    callCount: 0,
+    attributedInputTokens: 0,
+    attributedOutputTokens: 0
   };
   accumulator.callCount += 1;
   toolUsage.set(key, accumulator);
+}
+
+function addToolAttribution(
+  toolUsage: Map<string, ToolUsageAccumulator>,
+  hourBucket: string,
+  provider: ToolUsageEntry["provider"],
+  toolName: string,
+  inputTokens: number,
+  outputTokens: number
+): void {
+  const normalizedToolName = toolName.trim();
+  if (!normalizedToolName) {
+    return;
+  }
+
+  const key = createToolUsageKey(hourBucket, provider, normalizedToolName);
+  const accumulator = toolUsage.get(key) ?? {
+    hourBucket,
+    provider,
+    toolName: normalizedToolName,
+    callCount: 0,
+    attributedInputTokens: 0,
+    attributedOutputTokens: 0
+  };
+  accumulator.attributedInputTokens += Math.max(0, Math.trunc(inputTokens));
+  accumulator.attributedOutputTokens += Math.max(0, Math.trunc(outputTokens));
+  toolUsage.set(key, accumulator);
+}
+
+function addSplitToolAttribution(
+  toolUsage: Map<string, ToolUsageAccumulator>,
+  hourBucket: string,
+  provider: ToolUsageEntry["provider"],
+  toolNames: string[],
+  inputTokens: number,
+  outputTokens: number
+): void {
+  const normalizedToolNames = toolNames.map((toolName) => toolName.trim()).filter(Boolean);
+  if (normalizedToolNames.length === 0) {
+    return;
+  }
+
+  const inputShares = splitTokenCount(inputTokens, normalizedToolNames.length);
+  const outputShares = splitTokenCount(outputTokens, normalizedToolNames.length);
+  normalizedToolNames.forEach((toolName, index) => {
+    addToolAttribution(
+      toolUsage,
+      hourBucket,
+      provider,
+      toolName,
+      inputShares[index] ?? 0,
+      outputShares[index] ?? 0
+    );
+  });
+}
+
+function splitTokenCount(totalTokens: number, parts: number): number[] {
+  if (parts <= 0) {
+    return [];
+  }
+
+  const normalizedTotal = Math.max(0, Math.trunc(totalTokens));
+  const base = Math.floor(normalizedTotal / parts);
+  const remainder = normalizedTotal % parts;
+  return Array.from({ length: parts }, (_, index) => base + (index < remainder ? 1 : 0));
 }
 
 function readLineTimestamp(
@@ -2223,6 +2501,33 @@ function readLineTimestamp(
     : typeof payload.timestamp === "string"
       ? payload.timestamp
       : null;
+}
+
+function hasClaudeToolUse(turn: Record<string, unknown>): boolean {
+  const message = isRecord(turn.message) ? turn.message : {};
+  const content = Array.isArray(message.content) ? message.content : [];
+  return content.some((block) => isRecord(block) && block.type === "tool_use");
+}
+
+function hasClaudeToolResult(turn: Record<string, unknown>): boolean {
+  const message = isRecord(turn.message) ? turn.message : {};
+  const content = Array.isArray(message.content) ? message.content : [];
+  return content.some((block) => isRecord(block) && block.type === "tool_result");
+}
+
+function createClaudeAttributionTurn(
+  resultTurn: Record<string, unknown>,
+  usageTurn: Record<string, unknown>
+): Record<string, unknown> {
+  const resultMessage = isRecord(resultTurn.message) ? resultTurn.message : {};
+  const usageMessage = isRecord(usageTurn.message) ? usageTurn.message : {};
+  return {
+    ...usageTurn,
+    message: {
+      ...usageMessage,
+      content: resultMessage.content
+    }
+  };
 }
 
 function parseUsageBlock(value: unknown): ParsedUsageBlock {

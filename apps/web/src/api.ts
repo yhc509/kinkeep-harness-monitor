@@ -1,4 +1,6 @@
 import {
+  SubagentAttributionResponseSchema,
+  ToolAttributionResponseSchema,
   hookDetailSchema,
   integrationsResponseSchema,
   memoryResponseSchema,
@@ -16,6 +18,9 @@ import { z } from "zod";
 
 const sessionListSchema = z.array(sessionListItemSchema);
 
+export type TokenAttributionRange = 7 | 30 | 90;
+export type TokenAttributionProvider = "all" | "claude_code" | "codex";
+
 export const apiResourceKeys = {
   overview: "overview",
   projects: (query: string) => `projects:${query.trim().toLowerCase()}`,
@@ -31,6 +36,12 @@ export const apiResourceKeys = {
   hookDetail: (id: string) => `hook:${id}`,
   skillDetail: (id: string) => `skill:${id}`,
   tokens: (rangeDays: number) => `tokens:${rangeDays}`,
+  toolAttribution: (rangeDays: TokenAttributionRange, provider: TokenAttributionProvider) => (
+    `tool-attribution:${rangeDays}:${provider}`
+  ),
+  subagentAttribution: (rangeDays: TokenAttributionRange, provider: TokenAttributionProvider) => (
+    `subagent-attribution:${rangeDays}:${provider}`
+  ),
   projectTokenUsage: (unit: z.infer<typeof tokenPeriodUnitSchema>, anchorDay: string) => `project-token-usage:${unit}:${anchorDay}`
 } as const;
 
@@ -111,6 +122,22 @@ export function getProjectTokenUsage(unit: z.infer<typeof tokenPeriodUnitSchema>
     anchor: anchorDay
   });
   return requestJson(`/api/tokens/project-usage?${search.toString()}`, projectTokenUsageResponseSchema);
+}
+
+export function getToolAttribution(rangeDays: TokenAttributionRange, provider: TokenAttributionProvider) {
+  const search = new URLSearchParams({
+    range: `${rangeDays}d`,
+    provider
+  });
+  return requestJson(`/api/tokens/tool-attribution?${search.toString()}`, ToolAttributionResponseSchema);
+}
+
+export function getSubagentAttribution(rangeDays: TokenAttributionRange, provider: TokenAttributionProvider) {
+  const search = new URLSearchParams({
+    range: `${rangeDays}d`,
+    provider
+  });
+  return requestJson(`/api/tokens/subagent-attribution?${search.toString()}`, SubagentAttributionResponseSchema);
 }
 
 export function createSnapshot() {
