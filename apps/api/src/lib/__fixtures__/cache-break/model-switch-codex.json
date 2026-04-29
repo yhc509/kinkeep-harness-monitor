@@ -1,0 +1,36 @@
+{
+  "provider": "codex",
+  "prevTurn": {
+    "ts": 1776686400000,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 40000,
+    "cachedInputTokens": 36000,
+    "cacheReadInputTokens": 36000,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0.9
+  },
+  "currTurn": {
+    "ts": 1776686460000,
+    "model": "gpt-5.4-mini",
+    "provider": "codex",
+    "totalInputTokens": 40000,
+    "cachedInputTokens": 4000,
+    "cacheReadInputTokens": 4000,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0.1
+  },
+  "expected": {
+    "isBreak": true,
+    "primaryCause": "model_switch",
+    "confidence": "high",
+    "droppedPp": 0.8
+  },
+  "notes": "synthetic: Codex model changes via turn_context payload model/collaboration_mode settings."
+}

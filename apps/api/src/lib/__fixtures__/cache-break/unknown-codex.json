@@ -1,0 +1,36 @@
+{
+  "provider": "codex",
+  "prevTurn": {
+    "ts": 1776686400000,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 28000,
+    "cachedInputTokens": null,
+    "cacheReadInputTokens": null,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0
+  },
+  "currTurn": {
+    "ts": 1776686460000,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 29000,
+    "cachedInputTokens": null,
+    "cacheReadInputTokens": null,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0
+  },
+  "expected": {
+    "isBreak": false,
+    "primaryCause": "unknown",
+    "confidence": "low",
+    "droppedPp": 0
+  },
+  "notes": "synthetic: Codex cached information is absent and there are no idle, prompt, model, context, or compression clues."
+}

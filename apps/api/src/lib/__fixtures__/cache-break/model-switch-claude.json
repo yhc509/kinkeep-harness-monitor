@@ -1,0 +1,36 @@
+{
+  "provider": "claude_code",
+  "prevTurn": {
+    "ts": 1776686400000,
+    "model": "claude-opus-4-7",
+    "provider": "claude_code",
+    "totalInputTokens": 52000,
+    "cachedInputTokens": 46800,
+    "cacheReadInputTokens": 46800,
+    "cacheCreationInputTokens": 2200,
+    "ephemeral5mInputTokens": 0,
+    "ephemeral1hInputTokens": 2200,
+    "baseInstructionsHash": "sha256:claude-base-a",
+    "hitRate": 0.9
+  },
+  "currTurn": {
+    "ts": 1776686460000,
+    "model": "claude-sonnet-4-7",
+    "provider": "claude_code",
+    "totalInputTokens": 52000,
+    "cachedInputTokens": 5200,
+    "cacheReadInputTokens": 5200,
+    "cacheCreationInputTokens": 44000,
+    "ephemeral5mInputTokens": 0,
+    "ephemeral1hInputTokens": 44000,
+    "baseInstructionsHash": "sha256:claude-base-a",
+    "hitRate": 0.1
+  },
+  "expected": {
+    "isBreak": true,
+    "primaryCause": "model_switch",
+    "confidence": "high",
+    "droppedPp": 0.8
+  },
+  "notes": "synthetic: opus to sonnet switch with matching prompt hash and a large cache hit-rate drop."
+}

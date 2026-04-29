@@ -1,0 +1,36 @@
+{
+  "provider": "codex",
+  "prevTurn": {
+    "ts": 1776687732610,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 25049,
+    "cachedInputTokens": 23936,
+    "cacheReadInputTokens": 23936,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0.9555660904626931
+  },
+  "currTurn": {
+    "ts": 1776687743142,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 25392,
+    "cachedInputTokens": 24960,
+    "cacheReadInputTokens": 24960,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0.9829867674858223
+  },
+  "expected": {
+    "isBreak": false,
+    "primaryCause": "unknown",
+    "confidence": "low",
+    "droppedPp": -0.0274206770231292
+  },
+  "notes": "synthetic from observed Codex token_count shape: cached_input_tokens lives under payload.info.total_token_usage/last_token_usage."
+}

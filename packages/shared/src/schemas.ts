@@ -132,6 +132,56 @@ export const cacheSavingsSchema = z.object({
   hitRate: z.number()
 });
 
+const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const breakCauseSchema = z.enum([
+  "ttl_expired",
+  "system_prompt_change",
+  "model_switch",
+  "context_rebuild",
+  "compression",
+  "unknown"
+]);
+
+export const confidenceSchema = z.enum(["high", "low"]);
+
+export const providerSchema = z.enum(["claude_code", "codex"]);
+
+export const cacheBreakEventSchema = z.object({
+  rolloutPath: z.string(),
+  turnIndex: z.number().int().nonnegative(),
+  ts: z.number().int(),
+  provider: providerSchema,
+  model: z.string(),
+  prevHitRate: z.number().min(0).max(1),
+  currHitRate: z.number().min(0).max(1),
+  droppedPp: z.number().min(0).max(1),
+  primaryCause: breakCauseSchema,
+  confidence: confidenceSchema,
+  evidence: z.record(z.unknown()),
+  parseVersion: z.string()
+});
+
+export const breakAvailabilitySchema = z.enum(["full", "partial", "none"]);
+
+export const dailyCacheTrendPointSchema = z.object({
+  date: dateKeySchema,
+  hitRate: z.number().min(0).max(1),
+  totalInputTokens: z.number().int().nonnegative(),
+  breakCount: z.number().int().nonnegative(),
+  breakAvailability: breakAvailabilitySchema
+});
+
+export const cacheTrendResponseSchema = z.object({
+  points: z.array(dailyCacheTrendPointSchema)
+});
+
+export const cacheBreaksResponseSchema = z.object({
+  events: z.array(cacheBreakEventSchema.extend({
+    date: z.string()
+  }))
+});
+
 export const dailyProviderTokensSchema = z.object({
   day: z.string(),
   codexTokens: z.number(),
@@ -338,6 +388,13 @@ export type HourlyTokenUsage = z.infer<typeof hourlyTokenUsageSchema>;
 export type TokenBreakdown = z.infer<typeof tokenBreakdownSchema>;
 export type DailyTokenPoint = z.infer<typeof dailyTokenPointSchema>;
 export type CacheSavings = z.infer<typeof cacheSavingsSchema>;
+export type BreakCause = z.infer<typeof breakCauseSchema>;
+export type Confidence = z.infer<typeof confidenceSchema>;
+export type Provider = z.infer<typeof providerSchema>;
+export type CacheBreakEvent = z.infer<typeof cacheBreakEventSchema>;
+export type DailyCacheTrendPoint = z.infer<typeof dailyCacheTrendPointSchema>;
+export type CacheTrendResponse = z.infer<typeof cacheTrendResponseSchema>;
+export type CacheBreaksResponse = z.infer<typeof cacheBreaksResponseSchema>;
 export type DailyProviderTokens = z.infer<typeof dailyProviderTokensSchema>;
 export type TokenSyncStats = z.infer<typeof tokenSyncStatsSchema>;
 export type TokenPeriodUnit = z.infer<typeof tokenPeriodUnitSchema>;
