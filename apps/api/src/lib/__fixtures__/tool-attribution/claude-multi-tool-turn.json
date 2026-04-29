@@ -1,0 +1,67 @@
+{
+  "source": {
+    "provider": "claude_code",
+    "path": "/Users/example/.claude/projects/-Users-example-Dev-discord-bridge/session/subagents/agent-example.jsonl",
+    "lines": [1, 2, 3],
+    "sanitized": true,
+    "notes": "Extracted from a Claude turn with multiple Bash tool_use blocks. Paths, IDs, and command bodies are generalized."
+  },
+  "prevTurn": {
+    "type": "assistant",
+    "timestamp": "2026-04-20T00:19:03.283Z",
+    "message": {
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "usage": {
+        "input_tokens": 2000,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 306
+      },
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_example_first",
+          "name": "Bash",
+          "input": {
+            "command": "placeholder command one"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_example_second",
+          "name": "Bash",
+          "input": {
+            "command": "placeholder command two"
+          }
+        }
+      ]
+    }
+  },
+  "currTurn": {
+    "type": "assistant",
+    "timestamp": "2026-04-20T00:19:09.000Z",
+    "message": {
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "usage": {
+        "input_tokens": 2300,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 60
+      },
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_example_first",
+          "content": "placeholder result one"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_example_second",
+          "content": "placeholder result two"
+        }
+      ]
+    }
+  }
+}

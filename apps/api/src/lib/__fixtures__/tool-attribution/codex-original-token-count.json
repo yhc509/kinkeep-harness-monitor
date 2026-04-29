@@ -1,0 +1,28 @@
+{
+  "source": {
+    "provider": "codex",
+    "path": "/Users/example/.codex/sessions/2026/04/29/rollout-example.jsonl",
+    "line": 14,
+    "sanitized": true,
+    "notes": "Extracted from a Codex function_call_output containing an Original token count label. User path and output body are generalized."
+  },
+  "turn": {
+    "timestamp": "2026-04-28T22:46:02.900Z",
+    "type": "response_item",
+    "payload": {
+      "type": "function_call",
+      "name": "exec_command",
+      "arguments": "{\"cmd\":\"rg --files apps/api/src\"}",
+      "call_id": "call_example_label"
+    }
+  },
+  "functionCallOutput": {
+    "timestamp": "2026-04-28T22:46:03.217Z",
+    "type": "response_item",
+    "payload": {
+      "type": "function_call_output",
+      "call_id": "call_example_label",
+      "output": "Chunk ID: example\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 30\nOutput:\n/Users/example/Dev/project\napps/api/src/lib/token-collector.ts\npackages/shared/src/schemas.ts\n"
+    }
+  }
+}

@@ -9,6 +9,7 @@ import { loadConfig } from "./config";
 import { CompositeProvider } from "./lib/composite-provider";
 import { TokenCollectorService } from "./lib/token-collector";
 import { createProviderRegistry } from "./lib/provider-registry";
+import { registerTokenAttributionRoutes } from "./routes/tokens/attribution";
 import { registerTokenCacheRoutes } from "./routes/tokens/cache";
 
 export async function buildServer(config: AppConfig = loadConfig()) {
@@ -131,6 +132,7 @@ export async function buildServer(config: AppConfig = loadConfig()) {
   });
 
   registerTokenCacheRoutes(app, config);
+  registerTokenAttributionRoutes(app, config);
 
   app.post("/api/tokens/snapshot", async () => {
     const result = await collectorService.refreshUsageCacheInBackground(true, new Date());

@@ -1,0 +1,68 @@
+{
+  "source": {
+    "provider": "claude_code",
+    "path": "/Users/example/.claude/projects/-Users-example-Dev-epoch/session.jsonl",
+    "lines": [25, 26, 27],
+    "sanitized": true,
+    "notes": "Extracted from a Claude tool_use, adjacent tool_result, and following assistant usage turn. Paths, IDs, and result content are generalized."
+  },
+  "prevTurn": {
+    "type": "assistant",
+    "timestamp": "2026-04-24T11:08:56.249Z",
+    "message": {
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "usage": {
+        "input_tokens": 1000,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 120
+      },
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_example_search",
+          "name": "ToolSearch",
+          "input": {
+            "query": "placeholder search"
+          }
+        }
+      ]
+    }
+  },
+  "resultTurn": {
+    "type": "user",
+    "timestamp": "2026-04-24T11:08:56.254Z",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_example_search",
+          "content": "placeholder tool result"
+        }
+      ]
+    }
+  },
+  "currTurn": {
+    "type": "assistant",
+    "timestamp": "2026-04-24T11:09:01.053Z",
+    "message": {
+      "role": "assistant",
+      "model": "claude-sonnet-4-5",
+      "usage": {
+        "input_tokens": 1260,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 40
+      },
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_example_search",
+          "content": "placeholder tool result"
+        }
+      ]
+    }
+  }
+}
