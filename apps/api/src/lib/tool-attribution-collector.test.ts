@@ -55,5 +55,10 @@ describe("tool attribution collector", () => {
 
   it("returns null when a Codex function output has no Original token count label", () => {
     expect(parseCodexOriginalTokenCount(codexNoLabel.functionCallOutput.payload.output)).toBeNull();
+    expect(computeCodexAttribution(codexNoLabel.turn, codexNoLabel.functionCallOutput)).toMatchObject({
+      toolName: "write_stdin",
+      inputTokens: 0,
+      estimated: true
+    });
   });
 });

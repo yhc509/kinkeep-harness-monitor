@@ -249,7 +249,8 @@ export const subagentAttributionEntrySchema = z.object({
 
 export const subagentAttributionResponseSchema = z.object({
   root: subagentAttributionSummarySchema,
-  subagents: z.array(subagentAttributionEntrySchema)
+  subagents: z.array(subagentAttributionEntrySchema),
+  notes: z.array(z.string())
 });
 
 export const ToolAttributionEntrySchema = toolAttributionEntrySchema;

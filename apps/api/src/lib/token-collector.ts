@@ -1205,7 +1205,21 @@ export class TokenCollectorService {
         changedFiles.push(file);
       }
     }
+    const staleBreakPaths = new Set(staleBreakRows.map((row) => row.rollout_path));
+    const staleAttributionPaths = new Set(staleAttributionRows.map((row) => row.rollout_path));
     const changedFilePaths = new Set(changedFiles.map((file) => file.rolloutPath));
+    for (const rolloutPath of staleBreakPaths) {
+      if (!staleAttributionPaths.has(rolloutPath) || changedFilePaths.has(rolloutPath)) {
+        continue;
+      }
+
+      const file = filesByPath.get(rolloutPath);
+      if (file) {
+        changedFiles.push(file);
+        changedFilePaths.add(rolloutPath);
+      }
+    }
+
     const breakOnlyFiles = staleBreakRows
       .map((row) => filesByPath.get(row.rollout_path))
       .filter((file): file is RolloutFileState => file !== undefined)
@@ -1343,8 +1357,8 @@ export class TokenCollectorService {
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(rollout_path, hour_bucket, provider, tool_name) DO UPDATE SET
             call_count = excluded.call_count,
-            attributed_input_tokens = COALESCE(tool_token_attribution.attributed_input_tokens, 0) + COALESCE(excluded.attributed_input_tokens, 0),
-            attributed_output_tokens = COALESCE(tool_token_attribution.attributed_output_tokens, 0) + COALESCE(excluded.attributed_output_tokens, 0)
+            attributed_input_tokens = excluded.attributed_input_tokens,
+            attributed_output_tokens = excluded.attributed_output_tokens
         `);
         const project = parsed.project ?? createUnknownProjectInfo();
 
@@ -1463,8 +1477,8 @@ export class TokenCollectorService {
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(rollout_path, hour_bucket, provider, tool_name) DO UPDATE SET
             call_count = excluded.call_count,
-            attributed_input_tokens = COALESCE(tool_token_attribution.attributed_input_tokens, 0) + COALESCE(excluded.attributed_input_tokens, 0),
-            attributed_output_tokens = COALESCE(tool_token_attribution.attributed_output_tokens, 0) + COALESCE(excluded.attributed_output_tokens, 0)
+            attributed_input_tokens = excluded.attributed_input_tokens,
+            attributed_output_tokens = excluded.attributed_output_tokens
         `);
 
         for (const toolUsage of parsed.hourlyToolUsage.values()) {
@@ -1887,7 +1901,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
           const timestamp = new Date(rawTimestamp);
           if (!Number.isNaN(timestamp.getTime())) {
             const hourBucket = formatHourBucket(timestamp);
-            for (const toolName of extractedToolNames) {
+            for (const toolName of attributionToolNames) {
               addToolUsage(hourlyToolUsage, hourBucket, "codex", toolName);
             }
           }

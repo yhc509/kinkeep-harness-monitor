@@ -15,6 +15,7 @@ import { formatHourBucket, startOfLocalDay } from "../../lib/format";
 type AttributionRange = "7d" | "30d" | "90d";
 type AttributionProviderFilter = "all" | Provider;
 type StoredToolProvider = "claude-code" | "codex";
+const CLAUDE_SUBAGENT_ATTRIBUTION_NOTE = "Claude Code Task tool sub-agents are counted in root sessions.";
 
 interface AttributionQuery {
   range: AttributionRange;
@@ -77,6 +78,7 @@ function getToolAttribution(
   const database = new DatabaseSync(config.monitorDbPath);
   const startHourBucket = getStartHourBucket(range, now);
   const storedProvider = toStoredProviderFilter(provider);
+  const providerWhere = buildProviderWhere(storedProvider);
 
   try {
     const rows = database.prepare(`
@@ -88,10 +90,10 @@ function getToolAttribution(
         COALESCE(SUM(attributed_output_tokens), 0) AS output_tokens
       FROM tool_token_attribution
       WHERE hour_bucket >= ?
-        AND (? = 'all' OR provider = ?)
+        ${providerWhere.sql}
       GROUP BY provider, tool_name
       ORDER BY (input_tokens + output_tokens) DESC, call_count DESC, tool_name ASC
-    `).all(startHourBucket, storedProvider, storedProvider) as unknown as ToolAttributionRow[];
+    `).all(startHourBucket, ...providerWhere.params) as unknown as ToolAttributionRow[];
 
     return toolAttributionResponseSchema.parse({
       tools: rows.map((row) => ({
@@ -117,6 +119,7 @@ function getSubagentAttribution(
   const database = new DatabaseSync(config.monitorDbPath);
   const startHourBucket = getStartHourBucket(range, now);
   const storedProvider = toStoredProviderFilter(provider);
+  const providerWhere = buildProviderWhere(storedProvider);
   const codexSessionMeta = readCodexSessionMeta(config);
 
   try {
@@ -128,9 +131,9 @@ function getSubagentAttribution(
         COALESCE(SUM(attributed_output_tokens), 0) AS output_tokens
       FROM tool_token_attribution
       WHERE hour_bucket >= ?
-        AND (? = 'all' OR provider = ?)
+        ${providerWhere.sql}
       GROUP BY rollout_path, provider
-    `).all(startHourBucket, storedProvider, storedProvider) as unknown as RolloutAttributionRow[];
+    `).all(startHourBucket, ...providerWhere.params) as unknown as RolloutAttributionRow[];
 
     const root = {
       inputTokens: 0,
@@ -172,11 +175,27 @@ function getSubagentAttribution(
     return subagentAttributionResponseSchema.parse({
       root,
       subagents: Array.from(subagents.values())
-        .sort((left, right) => right.totalTokens - left.totalTokens || left.sessionId.localeCompare(right.sessionId))
+        .sort((left, right) => right.totalTokens - left.totalTokens || left.sessionId.localeCompare(right.sessionId)),
+      notes: buildSubagentAttributionNotes(provider)
     });
   } finally {
     database.close();
   }
+}
+
+function buildProviderWhere(provider: StoredToolProvider | "all"): { sql: string; params: StoredToolProvider[] } {
+  if (provider === "all") {
+    return { sql: "", params: [] };
+  }
+
+  return {
+    sql: "AND provider = ?",
+    params: [provider]
+  };
+}
+
+function buildSubagentAttributionNotes(provider: AttributionProviderFilter): string[] {
+  return provider === "codex" ? [] : [CLAUDE_SUBAGENT_ATTRIBUTION_NOTE];
 }
 
 function readCodexSessionMeta(config: AppConfig): Map<string, RolloutSessionMeta> {

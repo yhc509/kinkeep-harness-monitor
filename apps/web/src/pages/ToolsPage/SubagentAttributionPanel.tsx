@@ -34,6 +34,9 @@ export function SubagentAttributionPanel({ data }: SubagentAttributionPanelProps
     >
       <div className="subagent-attribution-layout">
         <section className="subagent-attribution-summary" aria-label="Root and sub-agent token totals">
+          {data.notes.length > 0 ? (
+            <p className="subagent-attribution-note">{data.notes[0]}</p>
+          ) : null}
           <div className="subagent-stack-bar" aria-hidden="true">
             <span
               className="root-segment"

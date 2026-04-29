@@ -68,7 +68,7 @@ export function computeCodexAttribution(
 
   return {
     toolName: rawToolName,
-    inputTokens: parseCodexOriginalTokenCount(output) ?? estimateTextTokens(output),
+    inputTokens: parseCodexOriginalTokenCount(output) ?? 0,
     outputTokens: estimateTextTokens(stripCodexTokenCountHeader(output)),
     estimated: true
   };

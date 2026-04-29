@@ -99,7 +99,18 @@ describe("API server", () => {
     expect(tokensJson.daily.some((entry) => entry.totalTokens === 140)).toBe(true);
     expect(tokensJson.dailyProviderTokens).toBeDefined();
     expect(tokensJson.dailyProviderTokens.some((entry) => entry.codexTokens === 140)).toBe(true);
-    expect(tokensJson.toolUsage).toEqual([]);
+    expect(tokensJson.toolUsage).toEqual([
+      {
+        provider: "codex",
+        toolName: "mcp__openaiDeveloperDocs__search_openai_docs",
+        callCount: 1
+      },
+      {
+        provider: "codex",
+        toolName: "spawn_agent",
+        callCount: 1
+      }
+    ]);
     expect(tokensJson.patterns.dowHourHeatmap).toEqual([
       {
         dow: 6,

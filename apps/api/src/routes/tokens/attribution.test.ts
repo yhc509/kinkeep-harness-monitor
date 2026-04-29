@@ -49,7 +49,8 @@ describe("token attribution routes", () => {
         outputTokens: 0,
         totalTokens: 0
       },
-      subagents: []
+      subagents: [],
+      notes: ["Claude Code Task tool sub-agents are counted in root sessions."]
     });
   });
 
@@ -233,7 +234,8 @@ describe("token attribution routes", () => {
           totalTokens: 75,
           estimated: true
         }
-      ]
+      ],
+      notes: ["Claude Code Task tool sub-agents are counted in root sessions."]
     });
   });
 
