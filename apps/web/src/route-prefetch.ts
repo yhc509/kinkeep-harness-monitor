@@ -5,7 +5,8 @@ const routeLoaders = {
   mcp: () => import("./pages/McpPage"),
   hooks: () => import("./pages/HooksPage"),
   skills: () => import("./pages/SkillsPage"),
-  tokens: () => import("./pages/TokensPage")
+  tokens: () => import("./pages/TokensPage"),
+  cache: () => import("./pages/CachePage")
 };
 
 export function loadDashboardPage() {
@@ -34,6 +35,10 @@ export function loadSkillsPage() {
 
 export function loadTokensPage() {
   return routeLoaders.tokens();
+}
+
+export function loadCachePage() {
+  return routeLoaders.cache();
 }
 
 export function prefetchRoute(pathname: string) {
@@ -65,6 +70,10 @@ export function prefetchRoute(pathname: string) {
     return routeLoaders.tokens();
   }
 
+  if (pathname.startsWith("/cache")) {
+    return routeLoaders.cache();
+  }
+
   return Promise.resolve(null);
 }
 
@@ -75,6 +84,7 @@ export function prefetchAllRoutes() {
     routeLoaders.mcp(),
     routeLoaders.hooks(),
     routeLoaders.skills(),
-    routeLoaders.tokens()
+    routeLoaders.tokens(),
+    routeLoaders.cache()
   ]);
 }

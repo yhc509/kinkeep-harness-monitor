@@ -8,6 +8,7 @@ import {
   loadHooksPage,
   loadMemoryPage,
   loadMcpPage,
+  loadCachePage,
   loadSessionsPage,
   loadSkillsPage,
   loadTokensPage,
@@ -21,6 +22,7 @@ const McpPage = lazy(async () => loadMcpPage().then((module) => ({ default: modu
 const HooksPage = lazy(async () => loadHooksPage().then((module) => ({ default: module.HooksPage })));
 const SkillsPage = lazy(async () => loadSkillsPage().then((module) => ({ default: module.SkillsPage })));
 const TokensPage = lazy(async () => loadTokensPage().then((module) => ({ default: module.TokensPage })));
+const CachePage = lazy(async () => loadCachePage().then((module) => ({ default: module.CachePage })));
 
 export function App() {
   useEffect(() => {
@@ -74,6 +76,7 @@ export function App() {
           <Route path="/hooks" element={<HooksPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
+          <Route path="/cache" element={<CachePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

@@ -1,4 +1,4 @@
-import { Brain, ChartColumnBig, LayoutDashboard, MessagesSquare, PlugZap, Settings2, Wrench } from "lucide-react";
+import { Brain, ChartColumnBig, Layers, LayoutDashboard, MessagesSquare, PlugZap, Settings2, Wrench } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { prefetchRoute } from "../route-prefetch";
 
@@ -9,7 +9,8 @@ const navItems = [
   { to: "/mcp", label: "MCP", icon: PlugZap },
   { to: "/hooks", label: "Hooks", icon: Wrench },
   { to: "/skills", label: "Skills", icon: Settings2 },
-  { to: "/tokens", label: "Tokens", icon: ChartColumnBig }
+  { to: "/tokens", label: "Tokens", icon: ChartColumnBig },
+  { to: "/cache", label: "Cache", icon: Layers }
 ];
 
 export function AppShell() {
