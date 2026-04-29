@@ -16,6 +16,7 @@ import { StatusPill } from "../components/StatusPill";
 import { ToolUsageChart } from "../components/ToolUsageChart";
 import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
 import { formatCurrency, formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
+import { DailyCacheTrendSection } from "./TokensPage/DailyCacheTrendSection";
 
 const ranges = [7, 30, 90];
 const projectUnits: Array<{ value: TokenPeriodUnit; label: string }> = [
@@ -329,6 +330,8 @@ export function TokensPage() {
                 </div>
               </div>
             </Panel>
+
+            <DailyCacheTrendSection />
 
             <Panel
               title="툴 사용 빈도"

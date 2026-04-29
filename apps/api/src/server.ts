@@ -9,6 +9,7 @@ import { loadConfig } from "./config";
 import { CompositeProvider } from "./lib/composite-provider";
 import { TokenCollectorService } from "./lib/token-collector";
 import { createProviderRegistry } from "./lib/provider-registry";
+import { registerTokenCacheRoutes } from "./routes/tokens/cache";
 
 export async function buildServer(config: AppConfig = loadConfig()) {
   const app = Fastify({
@@ -128,6 +129,8 @@ export async function buildServer(config: AppConfig = loadConfig()) {
 
     return collectorService.getProjectTokenUsage(unit, query.anchor, new Date());
   });
+
+  registerTokenCacheRoutes(app, config);
 
   app.post("/api/tokens/snapshot", async () => {
     const result = await collectorService.refreshUsageCacheInBackground(true, new Date());

@@ -1,0 +1,36 @@
+{
+  "provider": "claude_code",
+  "prevTurn": {
+    "ts": 1776686400000,
+    "model": "claude-sonnet-4-7",
+    "provider": "claude_code",
+    "totalInputTokens": 50000,
+    "cachedInputTokens": 42000,
+    "cacheReadInputTokens": 42000,
+    "cacheCreationInputTokens": 4000,
+    "ephemeral5mInputTokens": 0,
+    "ephemeral1hInputTokens": 4000,
+    "baseInstructionsHash": "sha256:claude-base-a",
+    "hitRate": 0.84
+  },
+  "currTurn": {
+    "ts": 1776686460000,
+    "model": "claude-sonnet-4-7",
+    "provider": "claude_code",
+    "totalInputTokens": 50000,
+    "cachedInputTokens": 18000,
+    "cacheReadInputTokens": 18000,
+    "cacheCreationInputTokens": 26000,
+    "ephemeral5mInputTokens": 0,
+    "ephemeral1hInputTokens": 26000,
+    "baseInstructionsHash": "sha256:claude-base-a",
+    "hitRate": 0.36
+  },
+  "expected": {
+    "isBreak": true,
+    "primaryCause": "context_rebuild",
+    "confidence": "high",
+    "droppedPp": 0.48
+  },
+  "notes": "synthetic: cache_read_input_tokens falls by more than 50% without model, prompt, or idle clues."
+}

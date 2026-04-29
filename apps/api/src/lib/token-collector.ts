@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -36,6 +37,8 @@ import {
   toLocalDateTime
 } from "./format";
 import { extractClaudeToolName, extractCodexToolNames } from "./cmd-normalize";
+import { detectCacheBreak } from "./cache-break-detector";
+import type { BreakDetectionResult, TurnSnapshot } from "./cache-break-types";
 import type { SessionLogProvider } from "./provider-adapter";
 import type { ResolvedProjectInfo } from "./project-resolver";
 import { resolveProjectInfoFromCwd } from "./project-resolver";
@@ -43,8 +46,11 @@ import { resolveProjectInfoFromCwd } from "./project-resolver";
 const CACHE_PARSE_VERSION = "9";
 const TOOL_PARSE_VERSION = 1;
 const ROLLOUT_PARSE_VERSION = `${CACHE_PARSE_VERSION}:tool-${TOOL_PARSE_VERSION}`;
+export const BREAK_PARSE_VERSION = "1";
+const BREAK_PARSE_VERSION_TEST_ENV = "HARNESS_MONITOR_BREAK_PARSE_VERSION";
 const HOURLY_DEBUG_WINDOW_HOURS = 48;
 const TOKEN_CACHE_STALE_MS = 5 * 60 * 1000;
+const CACHE_BREAK_IDLE_RESET_MS = 24 * 60 * 60 * 1000;
 const PROJECT_USAGE_LIMIT = 12;
 const MODEL_USAGE_LIMIT = 6;
 const UNKNOWN_PROJECT_ID = "__unknown__";
@@ -86,6 +92,7 @@ interface RolloutIndexStateRow {
   mtime_ms: number;
   indexed_at: string;
   parse_version: string;
+  break_parse_version: string;
 }
 
 interface RolloutFileState {
@@ -97,6 +104,7 @@ interface RolloutFileState {
 interface SyncPreparation {
   totalRollouts: number;
   changedFiles: RolloutFileState[];
+  breakOnlyFiles: RolloutFileState[];
   deletedPaths: string[];
   truncateToolUsage: boolean;
   hasCache: boolean;
@@ -119,6 +127,8 @@ interface ResolvedUsageBlock {
 }
 
 interface UsageAccumulator {
+  provider: CacheUsageProvider;
+  dataSource: CacheUsageDataSource;
   totalTokens: number;
   inputTokens: number;
   cachedInputTokens: number;
@@ -134,7 +144,19 @@ interface ParsedRolloutUsage {
   hourlyUsage: Map<string, UsageAccumulator>;
   hourlyModelUsage: Map<string, ModelUsageAccumulator>;
   hourlyToolUsage: Map<string, ToolUsageAccumulator>;
+  cacheBreakEvents: ParsedCacheBreakEvent[];
   tokenEvents: number;
+}
+
+interface IndexedTurnSnapshot extends TurnSnapshot {
+  turnIndex: number;
+}
+
+interface ParsedCacheBreakEvent {
+  turnIndex: number;
+  prevSnapshot: TurnSnapshot;
+  snapshot: TurnSnapshot;
+  result: BreakDetectionResult;
 }
 
 interface HourlyUsageRow {
@@ -199,6 +221,9 @@ interface ToolUsageAccumulator {
   toolName: string;
   callCount: number;
 }
+
+type CacheUsageProvider = "codex" | "claude_code";
+type CacheUsageDataSource = "jsonl" | "stats_cache";
 
 interface ToolUsageRow {
   provider: ToolUsageEntry["provider"];
@@ -295,6 +320,8 @@ export class TokenCollectorService {
       CREATE TABLE IF NOT EXISTS rollout_hourly_usage (
         rollout_path TEXT NOT NULL,
         hour_bucket TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT '',
+        data_source TEXT NOT NULL DEFAULT 'jsonl',
         project_id TEXT NOT NULL DEFAULT '',
         project_name TEXT NOT NULL DEFAULT '',
         project_path TEXT NOT NULL DEFAULT '',
@@ -330,7 +357,24 @@ export class TokenCollectorService {
         file_size INTEGER NOT NULL,
         mtime_ms INTEGER NOT NULL,
         indexed_at TEXT NOT NULL,
-        parse_version TEXT NOT NULL
+        parse_version TEXT NOT NULL,
+        break_parse_version TEXT NOT NULL DEFAULT ''
+      );
+
+      CREATE TABLE IF NOT EXISTS cache_break_event (
+        rollout_path TEXT NOT NULL,
+        turn_index INTEGER NOT NULL,
+        ts INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prev_hit_rate REAL NOT NULL,
+        curr_hit_rate REAL NOT NULL,
+        dropped_pp REAL NOT NULL,
+        primary_cause TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        parse_version TEXT NOT NULL,
+        PRIMARY KEY (rollout_path, turn_index)
       );
 
       CREATE TABLE IF NOT EXISTS tool_token_attribution (
@@ -361,14 +405,27 @@ export class TokenCollectorService {
     ensureColumn(database, "rollout_hourly_usage", "project_id", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_name", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, "rollout_hourly_usage", "project_path", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_hourly_usage", "provider", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "rollout_hourly_usage", "data_source", "TEXT NOT NULL DEFAULT 'jsonl'");
     ensureColumn(database, "rollout_hourly_usage", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_usage", "uncached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "rollout_index_state", "break_parse_version", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, "cache_break_event", "local_date", "TEXT NOT NULL DEFAULT ''");
+    // Existing rows are not backfilled; break_parse_version mismatch reprocesses them.
     ensureColumn(database, "rollout_hourly_model_usage", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_model_usage", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_model_usage", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_model_usage", "uncached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_model_usage", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(database, "rollout_hourly_model_usage", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_cache_break_ts
+        ON cache_break_event(ts);
+      CREATE INDEX IF NOT EXISTS idx_cache_break_provider_ts
+        ON cache_break_event(provider, ts);
+      CREATE INDEX IF NOT EXISTS idx_cache_break_provider_local_date
+        ON cache_break_event(provider, local_date);
+    `);
     database.close();
   }
 
@@ -403,6 +460,8 @@ export class TokenCollectorService {
         INSERT OR REPLACE INTO rollout_hourly_usage (
           rollout_path,
           hour_bucket,
+          provider,
+          data_source,
           project_id,
           project_name,
           project_path,
@@ -414,7 +473,7 @@ export class TokenCollectorService {
           output_tokens,
           reasoning_output_tokens,
           request_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertModelUsage = database.prepare(`
         INSERT OR REPLACE INTO rollout_hourly_model_usage (
@@ -437,6 +496,8 @@ export class TokenCollectorService {
         insertUsage.run(
           CLAUDE_CODE_STATS_ROLLOUT_PATH,
           entry.hourBucket,
+          "claude_code",
+          "stats_cache",
           CLAUDE_CODE_STATS_PROJECT_ID,
           CLAUDE_CODE_STATS_PROJECT_NAME,
           "",
@@ -474,14 +535,16 @@ export class TokenCollectorService {
           file_size,
           mtime_ms,
           indexed_at,
-          parse_version
-        ) VALUES (?, ?, ?, ?, ?)
+          parse_version,
+          break_parse_version
+        ) VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         CLAUDE_CODE_STATS_ROLLOUT_PATH,
         stats.size,
         Math.trunc(stats.mtimeMs),
         toLocalDateTime(new Date()) ?? "",
-        CLAUDE_CODE_STATS_PARSE_VERSION
+        CLAUDE_CODE_STATS_PARSE_VERSION,
+        getBreakParseVersion()
       );
 
       database.exec("COMMIT");
@@ -586,6 +649,7 @@ export class TokenCollectorService {
         ORDER BY day ASC
       `).all(formatHourBucket(startDate)) as unknown as DailyUsageRow[];
 
+      const providerCase = createRolloutUsageProviderCaseSql(this.config, "display");
       providerDailyRows = database.prepare(`
         SELECT
           day,
@@ -595,17 +659,14 @@ export class TokenCollectorService {
           SELECT
             substr(hour_bucket, 1, 10) AS day,
             total_tokens,
-            CASE
-              WHEN rollout_path = ? OR rollout_path LIKE '%/.claude/%' THEN 'claude-code'
-              ELSE 'codex'
-            END AS provider
+            ${providerCase.sql} AS provider
           FROM rollout_hourly_usage
           WHERE hour_bucket >= ?
         )
         GROUP BY day, provider
         ORDER BY day ASC, provider ASC
       `).all(
-        CLAUDE_CODE_STATS_ROLLOUT_PATH,
+        ...providerCase.params,
         formatHourBucket(startDate)
       ) as unknown as ProviderDailyUsageRow[];
 
@@ -1021,7 +1082,7 @@ export class TokenCollectorService {
 
   private hasStaleCacheVersion(): boolean {
     const database = this.openMonitorDb();
-    const staleRow = database.prepare(`
+    const staleRolloutRow = database.prepare(`
       SELECT 1 AS has_stale_cache
       FROM rollout_index_state
       WHERE (
@@ -1038,8 +1099,15 @@ export class TokenCollectorService {
       CLAUDE_CODE_STATS_ROLLOUT_PATH,
       ROLLOUT_PARSE_VERSION
     ) as { has_stale_cache: number } | undefined;
+    const staleBreakRow = database.prepare(`
+      SELECT 1 AS has_stale_cache
+      FROM rollout_index_state
+      WHERE break_parse_version != ?
+        AND rollout_path != ?
+      LIMIT 1
+    `).get(getBreakParseVersion(), CLAUDE_CODE_STATS_ROLLOUT_PATH) as { has_stale_cache: number } | undefined;
     database.close();
-    return Boolean(staleRow?.has_stale_cache);
+    return Boolean(staleRolloutRow?.has_stale_cache || staleBreakRow?.has_stale_cache);
   }
 
   private prepareSyncState(): SyncPreparation {
@@ -1054,7 +1122,8 @@ export class TokenCollectorService {
         file_size,
         mtime_ms,
         indexed_at,
-        parse_version
+        parse_version,
+        break_parse_version
       FROM rollout_index_state
     `).all() as unknown as RolloutIndexStateRow[];
     const usageCount = database.prepare(`
@@ -1069,9 +1138,20 @@ export class TokenCollectorService {
       SELECT COUNT(*) AS count
       FROM tool_token_attribution
     `).get() as { count: number };
+    const breakEventCount = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM cache_break_event
+    `).get() as { count: number };
+    const staleBreakRows = database.prepare(`
+      SELECT rollout_path
+      FROM rollout_index_state
+      WHERE break_parse_version != ?
+        AND rollout_path != ?
+    `).all(getBreakParseVersion(), CLAUDE_CODE_STATS_ROLLOUT_PATH) as unknown as RolloutPathRow[];
     database.close();
 
     const indexedMap = new Map(indexedRows.map((row) => [row.rollout_path, row]));
+    const filesByPath = new Map(files.map((file) => [file.rolloutPath, file]));
     const currentPaths = new Set<string>();
     const changedFiles: RolloutFileState[] = [];
     let truncateToolUsage = toolUsageCount.count > 0 && indexedRows.length === 0;
@@ -1095,6 +1175,11 @@ export class TokenCollectorService {
         changedFiles.push(file);
       }
     }
+    const changedFilePaths = new Set(changedFiles.map((file) => file.rolloutPath));
+    const breakOnlyFiles = staleBreakRows
+      .map((row) => filesByPath.get(row.rollout_path))
+      .filter((file): file is RolloutFileState => file !== undefined)
+      .filter((file) => !changedFilePaths.has(file.rolloutPath));
 
     const deletedPaths = indexedRows
       .map((row) => row.rollout_path)
@@ -1106,14 +1191,22 @@ export class TokenCollectorService {
     return {
       totalRollouts: files.length,
       changedFiles,
+      breakOnlyFiles,
       deletedPaths: [...new Set([...deletedPaths, ...staleSyntheticPaths])],
       truncateToolUsage,
-      hasCache: usageCount.count > 0 || modelUsageCount.count > 0 || toolUsageCount.count > 0 || indexedRows.length > 0
+      hasCache: (
+        usageCount.count > 0
+        || modelUsageCount.count > 0
+        || toolUsageCount.count > 0
+        || breakEventCount.count > 0
+        || indexedRows.length > 0
+      )
     };
   }
 
   private syncUsageCache(now: Date, preparation: SyncPreparation): SnapshotResult {
     const startedAt = toLocalDateTime(now) ?? "";
+    const breakParseVersion = getBreakParseVersion();
     const database = this.openMonitorDb();
 
     try {
@@ -1135,22 +1228,44 @@ export class TokenCollectorService {
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(rolloutPath);
         database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(rolloutPath);
         database.prepare(`DELETE FROM tool_token_attribution WHERE rollout_path = ?`).run(rolloutPath);
+        database.prepare(`DELETE FROM cache_break_event WHERE rollout_path = ?`).run(rolloutPath);
         database.prepare(`DELETE FROM rollout_index_state WHERE rollout_path = ?`).run(rolloutPath);
       }
 
+      const insertCacheBreakEvent = database.prepare(`
+        INSERT OR REPLACE INTO cache_break_event (
+          rollout_path,
+          turn_index,
+          ts,
+          local_date,
+          provider,
+          model,
+          prev_hit_rate,
+          curr_hit_rate,
+          dropped_pp,
+          primary_cause,
+          confidence,
+          evidence_json,
+          parse_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
       for (const file of preparation.changedFiles) {
         const provider = this.findProviderForPath(file.rolloutPath);
-        const parsed = isClaudeCodeRolloutPath(file.rolloutPath)
+        const parsed = isClaudeCodeSessionProvider(provider)
           ? parseClaudeCodeTranscriptUsage(file.rolloutPath, provider)
           : parseRolloutUsage(file.rolloutPath, provider);
         database.prepare(`DELETE FROM rollout_hourly_usage WHERE rollout_path = ?`).run(file.rolloutPath);
         database.prepare(`DELETE FROM rollout_hourly_model_usage WHERE rollout_path = ?`).run(file.rolloutPath);
         database.prepare(`DELETE FROM tool_token_attribution WHERE rollout_path = ?`).run(file.rolloutPath);
+        database.prepare(`DELETE FROM cache_break_event WHERE rollout_path = ?`).run(file.rolloutPath);
 
         const insertUsage = database.prepare(`
           INSERT INTO rollout_hourly_usage (
             rollout_path,
             hour_bucket,
+            provider,
+            data_source,
             project_id,
             project_name,
             project_path,
@@ -1162,7 +1277,7 @@ export class TokenCollectorService {
             output_tokens,
             reasoning_output_tokens,
             request_count
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const insertModelUsage = database.prepare(`
           INSERT INTO rollout_hourly_model_usage (
@@ -1197,6 +1312,8 @@ export class TokenCollectorService {
           insertUsage.run(
             file.rolloutPath,
             hourBucket,
+            usage.provider,
+            usage.dataSource,
             project.projectId,
             project.projectName,
             project.projectPath,
@@ -1237,6 +1354,7 @@ export class TokenCollectorService {
             toolUsage.callCount
           );
         }
+        insertCacheBreakEvents(insertCacheBreakEvent, file.rolloutPath, parsed.cacheBreakEvents, breakParseVersion);
 
         database.prepare(`
           INSERT INTO rollout_index_state (
@@ -1244,24 +1362,41 @@ export class TokenCollectorService {
             file_size,
             mtime_ms,
             indexed_at,
-            parse_version
-          ) VALUES (?, ?, ?, ?, ?)
+            parse_version,
+            break_parse_version
+          ) VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT(rollout_path) DO UPDATE SET
             file_size = excluded.file_size,
             mtime_ms = excluded.mtime_ms,
             indexed_at = excluded.indexed_at,
-            parse_version = excluded.parse_version
+            parse_version = excluded.parse_version,
+            break_parse_version = excluded.break_parse_version
         `).run(
           file.rolloutPath,
           file.fileSize,
           file.mtimeMs,
           toLocalDateTime(new Date()) ?? "",
-          ROLLOUT_PARSE_VERSION
+          ROLLOUT_PARSE_VERSION,
+          breakParseVersion
         );
 
         stats.updatedRollouts += 1;
         stats.hourBuckets += parsed.hourlyUsage.size;
         stats.tokenEvents += parsed.tokenEvents;
+      }
+
+      for (const file of preparation.breakOnlyFiles) {
+        const provider = this.findProviderForPath(file.rolloutPath);
+        const parsed = isClaudeCodeSessionProvider(provider)
+          ? parseClaudeCodeTranscriptUsage(file.rolloutPath, provider)
+          : parseRolloutUsage(file.rolloutPath, provider);
+        database.prepare(`DELETE FROM cache_break_event WHERE rollout_path = ?`).run(file.rolloutPath);
+        insertCacheBreakEvents(insertCacheBreakEvent, file.rolloutPath, parsed.cacheBreakEvents, breakParseVersion);
+        database.prepare(`
+          UPDATE rollout_index_state
+          SET break_parse_version = ?
+          WHERE rollout_path = ?
+        `).run(breakParseVersion, file.rolloutPath);
       }
 
       database.exec("COMMIT");
@@ -1536,17 +1671,58 @@ function buildRunMessage(preparation: SyncPreparation, stats: TokenSyncStats): s
   ].join(" · ");
 }
 
+function getBreakParseVersion(): string {
+  if (process.env.NODE_ENV === "test") {
+    const override = process.env[BREAK_PARSE_VERSION_TEST_ENV]?.trim();
+    if (override) {
+      return override;
+    }
+  }
+
+  return BREAK_PARSE_VERSION;
+}
+
+function insertCacheBreakEvents(
+  insertStatement: ReturnType<DatabaseSync["prepare"]>,
+  rolloutPath: string,
+  events: ParsedCacheBreakEvent[],
+  parseVersion: string
+): void {
+  for (const event of events) {
+    insertStatement.run(
+      rolloutPath,
+      event.turnIndex,
+      event.snapshot.ts,
+      formatDayKey(startOfLocalHour(new Date(event.snapshot.ts))),
+      event.snapshot.provider,
+      event.snapshot.model,
+      event.prevSnapshot.hitRate,
+      event.snapshot.hitRate,
+      event.result.droppedPp,
+      event.result.primaryCause,
+      event.result.confidence,
+      JSON.stringify(event.result.evidence),
+      parseVersion
+    );
+  }
+}
+
 function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogProvider): ParsedRolloutUsage {
   const text = fs.readFileSync(rolloutPath, "utf8");
   const lines = text.split("\n");
   const hourlyUsage = new Map<string, UsageAccumulator>();
   const hourlyModelUsage = new Map<string, ModelUsageAccumulator>();
   const hourlyToolUsage = new Map<string, ToolUsageAccumulator>();
+  const cacheBreakEvents: ParsedCacheBreakEvent[] = [];
   let project: ResolvedProjectInfo | null = sessionLogProvider.resolveProjectInfoForRolloutPath(rolloutPath);
   let currentModelProvider: string | null = null;
   let currentModelName: string | null = null;
+  let baseInstructionsHash: string | null = null;
+  let previousCacheBreakTurn: IndexedTurnSnapshot | null = null;
+  let cacheBreakTurnIndex = 0;
   let tokenEvents = 0;
   let previousTotals: ParsedUsageBlock = emptyParsedUsage();
+  const usageProvider = getCacheUsageProvider(sessionLogProvider);
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -1574,6 +1750,10 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
 
       if (typeof payload.model_provider === "string" && payload.model_provider.trim()) {
         currentModelProvider = payload.model_provider.trim();
+      }
+      const nextBaseInstructionsHash = readBaseInstructionsHash(payload);
+      if (nextBaseInstructionsHash) {
+        baseInstructionsHash = nextBaseInstructionsHash;
       }
       continue;
     }
@@ -1615,6 +1795,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     const info = isRecord(payload.info) ? payload.info : {};
     const totalUsage = parseUsageBlock(info.total_token_usage);
     const lastUsage = parseUsageBlock(info.last_token_usage);
+    const snapshotModelName = readOptionalString(payload, "model") ?? readOptionalString(info, "model") ?? currentModelName;
     const rawTimestamp = typeof parsed.timestamp === "string"
       ? parsed.timestamp
       : typeof payload.timestamp === "string"
@@ -1648,7 +1829,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     tokenEvents += 1;
 
     const hourBucket = formatHourBucket(timestamp);
-    const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator();
+    const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator(usageProvider, "jsonl");
     accumulator.totalTokens += delta.totalTokens;
     accumulator.inputTokens += delta.inputTokens;
     accumulator.cachedInputTokens += delta.cachedInputTokens;
@@ -1669,6 +1850,22 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     modelUsage.reasoningOutputTokens += delta.reasoningOutputTokens;
     modelUsage.requestCount += 1;
     hourlyModelUsage.set(modelUsageKey, modelUsage);
+
+    const turnIndex = cacheBreakTurnIndex;
+    cacheBreakTurnIndex += 1;
+    const turnSnapshot = createCodexTurnSnapshot({
+      timestamp,
+      modelName: snapshotModelName,
+      totalInputTokens: delta.inputTokens,
+      cachedInputTokens: (lastUsage.cachedInputTokens !== null || totalUsage.cachedInputTokens !== null)
+        ? delta.cachedInputTokens
+        : null,
+      baseInstructionsHash,
+      turnIndex
+    });
+    if (turnSnapshot) {
+      previousCacheBreakTurn = collectCacheBreakEvent(cacheBreakEvents, previousCacheBreakTurn, turnSnapshot);
+    }
   }
 
   return {
@@ -1676,6 +1873,7 @@ function parseRolloutUsage(rolloutPath: string, sessionLogProvider: SessionLogPr
     hourlyUsage,
     hourlyModelUsage,
     hourlyToolUsage,
+    cacheBreakEvents,
     tokenEvents
   };
 }
@@ -1689,8 +1887,13 @@ function parseClaudeCodeTranscriptUsage(
   const hourlyUsage = new Map<string, UsageAccumulator>();
   const hourlyModelUsage = new Map<string, ModelUsageAccumulator>();
   const hourlyToolUsage = new Map<string, ToolUsageAccumulator>();
+  const cacheBreakEvents: ParsedCacheBreakEvent[] = [];
   let project: ResolvedProjectInfo | null = sessionLogProvider.resolveProjectInfoForRolloutPath(rolloutPath);
+  let baseInstructionsHash: string | null = null;
+  let previousCacheBreakTurn: IndexedTurnSnapshot | null = null;
+  let cacheBreakTurnIndex = 0;
   let tokenEvents = 0;
+  const usageProvider = getCacheUsageProvider(sessionLogProvider);
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -1706,6 +1909,14 @@ function parseClaudeCodeTranscriptUsage(
     }
 
     const type = readOptionalString(parsed, "type") ?? "";
+    if (type === "session_meta") {
+      const nextBaseInstructionsHash = readBaseInstructionsHash(parsed);
+      if (nextBaseInstructionsHash) {
+        baseInstructionsHash = nextBaseInstructionsHash;
+      }
+      continue;
+    }
+
     if (type === "user") {
       const cwd = readOptionalString(parsed, "cwd");
       if (cwd) {
@@ -1759,6 +1970,8 @@ function parseClaudeCodeTranscriptUsage(
     const outputTokens = readUsageNumber(usage, "output_tokens");
     const cacheCreationTokens = readUsageNumber(usage, "cache_creation_input_tokens");
     const cacheReadTokens = readUsageNumber(usage, "cache_read_input_tokens");
+    const ephemeral5mInputTokens = readOptionalUsageNumber(usage, "ephemeral_5m_input_tokens");
+    const ephemeral1hInputTokens = readOptionalUsageNumber(usage, "ephemeral_1h_input_tokens");
     // Claude reports uncached input, cache writes, and cache reads separately.
     // Normalize to the shared schema so inputTokens is total input and
     // cachedInputTokens only represents cache-hit tokens.
@@ -1773,7 +1986,7 @@ function parseClaudeCodeTranscriptUsage(
     tokenEvents += 1;
 
     const hourBucket = formatHourBucket(timestamp);
-    const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator();
+    const accumulator = hourlyUsage.get(hourBucket) ?? createEmptyUsageAccumulator(usageProvider, "jsonl");
     accumulator.totalTokens += totalTokens;
     accumulator.inputTokens += inputTokens;
     accumulator.cachedInputTokens += cachedInputTokens;
@@ -1795,6 +2008,23 @@ function parseClaudeCodeTranscriptUsage(
     modelUsage.outputTokens += outputTokens;
     modelUsage.requestCount += 1;
     hourlyModelUsage.set(modelUsageKey, modelUsage);
+
+    const turnIndex = cacheBreakTurnIndex;
+    cacheBreakTurnIndex += 1;
+    const turnSnapshot = createClaudeCodeTurnSnapshot({
+      timestamp,
+      modelName,
+      totalInputTokens: inputTokens,
+      cacheReadInputTokens: cacheReadTokens,
+      cacheCreationInputTokens: cacheCreationTokens,
+      ephemeral5mInputTokens,
+      ephemeral1hInputTokens,
+      baseInstructionsHash,
+      turnIndex
+    });
+    if (turnSnapshot) {
+      previousCacheBreakTurn = collectCacheBreakEvent(cacheBreakEvents, previousCacheBreakTurn, turnSnapshot);
+    }
   }
 
   return {
@@ -1802,8 +2032,138 @@ function parseClaudeCodeTranscriptUsage(
     hourlyUsage,
     hourlyModelUsage,
     hourlyToolUsage,
+    cacheBreakEvents,
     tokenEvents
   };
+}
+
+function collectCacheBreakEvent(
+  events: ParsedCacheBreakEvent[],
+  previousTurn: IndexedTurnSnapshot | null,
+  currentTurn: IndexedTurnSnapshot
+): IndexedTurnSnapshot {
+  if (!previousTurn) {
+    return currentTurn;
+  }
+
+  if ((currentTurn.ts - previousTurn.ts) >= CACHE_BREAK_IDLE_RESET_MS) {
+    return currentTurn;
+  }
+
+  const result = detectCacheBreak({
+    provider: currentTurn.provider,
+    prevTurn: previousTurn,
+    currTurn: currentTurn
+  });
+  if (result) {
+    events.push({
+      turnIndex: currentTurn.turnIndex,
+      prevSnapshot: previousTurn,
+      snapshot: currentTurn,
+      result
+    });
+  }
+
+  return currentTurn;
+}
+
+function createCodexTurnSnapshot(input: {
+  timestamp: Date;
+  modelName: string | null;
+  totalInputTokens: number;
+  cachedInputTokens: number | null;
+  baseInstructionsHash: string | null;
+  turnIndex: number;
+}): IndexedTurnSnapshot | null {
+  if (input.totalInputTokens <= 0) {
+    return null;
+  }
+
+  return createTurnSnapshot({
+    ts: input.timestamp.getTime(),
+    provider: "codex",
+    model: input.modelName?.trim() || UNKNOWN_MODEL_NAME,
+    totalInputTokens: input.totalInputTokens,
+    cachedInputTokens: input.cachedInputTokens,
+    cacheReadInputTokens: input.cachedInputTokens,
+    cacheCreationInputTokens: null,
+    ephemeral5mInputTokens: null,
+    ephemeral1hInputTokens: null,
+    baseInstructionsHash: input.baseInstructionsHash,
+    turnIndex: input.turnIndex
+  });
+}
+
+function createClaudeCodeTurnSnapshot(input: {
+  timestamp: Date;
+  modelName: string | null;
+  totalInputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  ephemeral5mInputTokens: number | null;
+  ephemeral1hInputTokens: number | null;
+  baseInstructionsHash: string | null;
+  turnIndex: number;
+}): IndexedTurnSnapshot | null {
+  if (input.totalInputTokens <= 0) {
+    return null;
+  }
+
+  return createTurnSnapshot({
+    ts: input.timestamp.getTime(),
+    provider: "claude_code",
+    model: input.modelName?.trim() || UNKNOWN_MODEL_NAME,
+    totalInputTokens: input.totalInputTokens,
+    cachedInputTokens: input.cacheReadInputTokens,
+    cacheReadInputTokens: input.cacheReadInputTokens,
+    cacheCreationInputTokens: input.cacheCreationInputTokens,
+    ephemeral5mInputTokens: input.ephemeral5mInputTokens,
+    ephemeral1hInputTokens: input.ephemeral1hInputTokens,
+    baseInstructionsHash: input.baseInstructionsHash,
+    turnIndex: input.turnIndex
+  });
+}
+
+function createTurnSnapshot(input: Omit<IndexedTurnSnapshot, "hitRate">): IndexedTurnSnapshot {
+  return {
+    ...input,
+    hitRate: calculateCacheHitRate({
+      inputTokens: input.totalInputTokens,
+      cachedInputTokens: input.cachedInputTokens ?? 0,
+      cacheCreationInputTokens: input.cacheCreationInputTokens ?? 0
+    })
+  };
+}
+
+function readBaseInstructionsHash(record: Record<string, unknown>): string | null {
+  if (Object.hasOwn(record, "base_instructions")) {
+    return hashBaseInstructions(record.base_instructions);
+  }
+
+  const sessionMeta = isRecord(record.session_meta) ? record.session_meta : null;
+  if (sessionMeta && Object.hasOwn(sessionMeta, "base_instructions")) {
+    return hashBaseInstructions(sessionMeta.base_instructions);
+  }
+
+  const payload = isRecord(record.payload) ? record.payload : null;
+  if (payload && Object.hasOwn(payload, "base_instructions")) {
+    return hashBaseInstructions(payload.base_instructions);
+  }
+
+  return null;
+}
+
+function hashBaseInstructions(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
+  if (serialized === undefined) {
+    return null;
+  }
+
+  return `sha256:${createHash("sha256").update(serialized).digest("hex")}`;
 }
 
 function extractCodexExecCommands(argumentsValue: unknown): string[] {
@@ -1881,6 +2241,11 @@ function readUsageNumber(usage: Record<string, unknown>, key: string): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
+function readOptionalUsageNumber(usage: Record<string, unknown>, key: string): number | null {
+  const value = readOptionalNumber(usage, key);
+  return value === null ? null : Math.max(0, value);
+}
+
 function resolveUsageDelta(
   lastUsage: ParsedUsageBlock,
   totalUsage: ParsedUsageBlock,
@@ -1948,8 +2313,13 @@ function hasCumulativeUsageProgress(totalUsage: ParsedUsageBlock, previousTotals
   return !hasTotals;
 }
 
-function createEmptyUsageAccumulator(): UsageAccumulator {
+function createEmptyUsageAccumulator(
+  provider: CacheUsageProvider,
+  dataSource: CacheUsageDataSource
+): UsageAccumulator {
   return {
+    provider,
+    dataSource,
     totalTokens: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -2438,8 +2808,56 @@ function isSyntheticRolloutPath(rolloutPath: string): boolean {
   return SYNTHETIC_ROLLOUT_PATHS.has(rolloutPath);
 }
 
-function isClaudeCodeRolloutPath(rolloutPath: string): boolean {
-  return isSyntheticRolloutPath(rolloutPath) || rolloutPath.includes("/.claude/");
+function isClaudeCodeSessionProvider(sessionLogProvider: SessionLogProvider): boolean {
+  return readSessionProviderId(sessionLogProvider) === "claude-code";
+}
+
+function getCacheUsageProvider(sessionLogProvider: SessionLogProvider): CacheUsageProvider {
+  return isClaudeCodeSessionProvider(sessionLogProvider) ? "claude_code" : "codex";
+}
+
+function readSessionProviderId(sessionLogProvider: SessionLogProvider): string | null {
+  const providerLike = sessionLogProvider as { id?: unknown };
+  return typeof providerLike.id === "string" ? providerLike.id : null;
+}
+
+function createRolloutUsageProviderCaseSql(
+  config: AppConfig,
+  labelStyle: "storage" | "display"
+): { sql: string; params: string[] } {
+  const claudeLabel = labelStyle === "display" ? "claude-code" : "claude_code";
+  const codexLabel = "codex";
+  const claudeHome = normalizePathBoundary(config.providers.claudeCode.home);
+  const codexHome = normalizePathBoundary(config.providers.codex.codexHome);
+
+  return {
+    sql: `
+      CASE
+        WHEN provider = 'claude_code' THEN '${claudeLabel}'
+        WHEN provider = 'codex' THEN '${codexLabel}'
+        WHEN rollout_path = ? OR rollout_path = ? OR substr(rollout_path, 1, length(?)) = ? THEN '${claudeLabel}'
+        WHEN rollout_path = ? OR substr(rollout_path, 1, length(?)) = ? THEN '${codexLabel}'
+        ELSE '${codexLabel}'
+      END
+    `,
+    params: [
+      CLAUDE_CODE_STATS_ROLLOUT_PATH,
+      claudeHome.root,
+      claudeHome.childPrefix,
+      claudeHome.childPrefix,
+      codexHome.root,
+      codexHome.childPrefix,
+      codexHome.childPrefix
+    ]
+  };
+}
+
+function normalizePathBoundary(value: string): { root: string; childPrefix: string } {
+  const root = path.resolve(value);
+  return {
+    root,
+    childPrefix: root.endsWith(path.sep) ? root : `${root}${path.sep}`
+  };
 }
 
 function parseDayKey(value: string | undefined, fallback: Date): Date {

@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeCodeDataService } from "./claude-code-service";
 import { CodexDataService } from "./codex-service";
-import { TokenCollectorService } from "./token-collector";
+import { BREAK_PARSE_VERSION, TokenCollectorService } from "./token-collector";
 import { createClaudeCodeTestFixture } from "../test-support/claude-fixture";
 import { createTestFixture } from "../test-support/fixture";
 
@@ -12,6 +12,7 @@ const fixtures: Array<{ cleanup: () => void }> = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 
   while (fixtures.length > 0) {
     fixtures.pop()?.cleanup();
@@ -19,6 +20,351 @@ afterEach(() => {
 });
 
 describe("TokenCollectorService", () => {
+  it("exposes the cache break parse version", () => {
+    expect(BREAK_PARSE_VERSION).toBe("1");
+  });
+
+  it("migrates cache break local_date before creating cache break indexes", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+    fs.mkdirSync(path.dirname(fixture.config.monitorDbPath), { recursive: true });
+    const setupDatabase = new DatabaseSync(fixture.config.monitorDbPath);
+    setupDatabase.exec(`
+      CREATE TABLE cache_break_event (
+        rollout_path TEXT NOT NULL,
+        turn_index INTEGER NOT NULL,
+        ts INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prev_hit_rate REAL NOT NULL,
+        curr_hit_rate REAL NOT NULL,
+        dropped_pp REAL NOT NULL,
+        primary_cause TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        parse_version TEXT NOT NULL,
+        PRIMARY KEY (rollout_path, turn_index)
+      );
+      CREATE INDEX idx_cache_break_ts
+        ON cache_break_event(ts);
+      CREATE INDEX idx_cache_break_provider_ts
+        ON cache_break_event(provider, ts);
+      INSERT INTO cache_break_event (
+        rollout_path,
+        turn_index,
+        ts,
+        provider,
+        model,
+        prev_hit_rate,
+        curr_hit_rate,
+        dropped_pp,
+        primary_cause,
+        confidence,
+        evidence_json,
+        parse_version
+      ) VALUES (
+        '/tmp/old-rollout.jsonl',
+        1,
+        1773463200000,
+        'codex',
+        'gpt-5.4',
+        0.9,
+        0.1,
+        0.8,
+        'unknown',
+        'low',
+        '{}',
+        '1'
+      );
+    `);
+    setupDatabase.close();
+
+    const collector = new TokenCollectorService(fixture.config, [new CodexDataService(fixture.config)]);
+    collector.ensureSchema();
+
+    const verifyDatabase = new DatabaseSync(fixture.config.monitorDbPath);
+    const columns = verifyDatabase.prepare(`PRAGMA table_info(cache_break_event)`).all() as Array<{ name: string }>;
+    const indexes = verifyDatabase.prepare(`PRAGMA index_list(cache_break_event)`).all() as Array<{ name: string }>;
+    verifyDatabase.prepare(`
+      INSERT INTO cache_break_event (
+        rollout_path,
+        turn_index,
+        ts,
+        local_date,
+        provider,
+        model,
+        prev_hit_rate,
+        curr_hit_rate,
+        dropped_pp,
+        primary_cause,
+        confidence,
+        evidence_json,
+        parse_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "/tmp/new-rollout.jsonl",
+      2,
+      1773463260000,
+      "2026-03-14",
+      "codex",
+      "gpt-5.4",
+      0.9,
+      0.1,
+      0.8,
+      "unknown",
+      "low",
+      "{}",
+      "1"
+    );
+    const rowCount = verifyDatabase.prepare(`
+      SELECT COUNT(*) AS count
+      FROM cache_break_event
+    `).get() as { count: number };
+    verifyDatabase.close();
+
+    expect(columns.map((column) => column.name)).toContain("local_date");
+    expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining([
+      "idx_cache_break_ts",
+      "idx_cache_break_provider_ts",
+      "idx_cache_break_provider_local_date"
+    ]));
+    expect(rowCount.count).toBe(2);
+  });
+
+  it("inserts cache break events while collecting rollout token turns", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      rollout_path: fixture.rolloutPath,
+      turn_index: 1,
+      local_date: "2026-03-14",
+      provider: "codex",
+      model: "gpt-5.4",
+      primary_cause: "context_rebuild",
+      confidence: "low",
+      parse_version: BREAK_PARSE_VERSION
+    });
+    expect(events[0]?.prev_hit_rate).toBeCloseTo(0.9, 6);
+    expect(events[0]?.curr_hit_rate).toBeCloseTo(0.1, 6);
+    expect(events[0]?.dropped_pp).toBeCloseTo(0.8, 6);
+    expect(JSON.parse(events[0]!.evidence_json)).toMatchObject({
+      prevCachedInputTokens: 900,
+      currCachedInputTokens: 100
+    });
+  });
+
+  it("extracts Claude Code turns for cache break events", () => {
+    const fixture = createClaudeCodeTestFixture({ includeAssistantUsage: false });
+    fixtures.push(fixture);
+
+    const claude = new ClaudeCodeDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [claude]);
+    writeClaudeCodeCacheBreakTranscript(fixture.primaryRolloutPath);
+
+    collector.captureSnapshot(new Date("2026-03-18T10:05:00+09:00"));
+
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      rollout_path: fixture.primaryRolloutPath,
+      turn_index: 1,
+      local_date: "2026-03-18",
+      provider: "claude_code",
+      model: "claude-opus-4-6",
+      primary_cause: "context_rebuild",
+      confidence: "high",
+      parse_version: BREAK_PARSE_VERSION
+    });
+    expect(events[0]?.prev_hit_rate).toBeCloseTo(0.9, 6);
+    expect(events[0]?.curr_hit_rate).toBeCloseTo(0.1, 6);
+  });
+
+  it("recalculates cache break events when only the break parse version changes", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    const usageBefore = readRolloutUsageSummary(fixture.config.monitorDbPath, fixture.rolloutPath);
+    overwriteCacheBreakEvidence(fixture.config.monitorDbPath, fixture.rolloutPath, {
+      evidenceJson: JSON.stringify({ stale: true }),
+      parseVersion: BREAK_PARSE_VERSION
+    });
+
+    vi.stubEnv("HARNESS_MONITOR_BREAK_PARSE_VERSION", "2");
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(0);
+    expect(readRolloutUsageSummary(fixture.config.monitorDbPath, fixture.rolloutPath)).toEqual(usageBefore);
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.parse_version).toBe("2");
+    expect(JSON.parse(events[0]!.evidence_json)).toMatchObject({
+      prevCachedInputTokens: 900,
+      currCachedInputTokens: 100
+    });
+  });
+
+  it("refreshes cache break events as part of a rollout parse-version reindex", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    overwriteCacheBreakEvidence(fixture.config.monitorDbPath, fixture.rolloutPath, {
+      evidenceJson: JSON.stringify({ stale: true }),
+      parseVersion: BREAK_PARSE_VERSION
+    });
+    const database = new DatabaseSync(fixture.config.monitorDbPath);
+    database.prepare(`
+      UPDATE rollout_index_state
+      SET parse_version = ?
+      WHERE rollout_path = ?
+    `).run("rollout-parse-v0", fixture.rolloutPath);
+    database.close();
+
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(1);
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.parse_version).toBe(BREAK_PARSE_VERSION);
+    expect(JSON.parse(events[0]!.evidence_json)).toMatchObject({
+      prevCachedInputTokens: 900,
+      currCachedInputTokens: 100
+    });
+  });
+
+  it("wipes stale cache break rows during a rollout parse-version reindex", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    overwriteCacheBreakEvidence(fixture.config.monitorDbPath, fixture.rolloutPath, {
+      evidenceJson: JSON.stringify({ stale: true }),
+      parseVersion: BREAK_PARSE_VERSION
+    });
+    insertSyntheticCacheBreakRow(fixture.config.monitorDbPath, fixture.rolloutPath, 99);
+    markRolloutParseVersionStale(fixture.config.monitorDbPath, fixture.rolloutPath);
+
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(1);
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events.map((event) => event.turn_index)).toEqual([1]);
+    expect(JSON.parse(events[0]!.evidence_json)).toMatchObject({
+      prevCachedInputTokens: 900,
+      currCachedInputTokens: 100
+    });
+  });
+
+  it("resets cache break comparison after a 24-hour idle gap", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexIdleGapCacheDropRollout(fixture.rolloutPath, fixture.rootDir, "2026-03-15T10:00:02.000Z");
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    expect(readCacheBreakRows(fixture.config.monitorDbPath)).toEqual([]);
+  });
+
+  it("keeps legitimate TTL cache breaks across a 4-hour idle gap", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexIdleGapCacheDropRollout(fixture.rolloutPath, fixture.rootDir, "2026-03-14T14:00:02.000Z");
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      turn_index: 1,
+      primary_cause: "ttl_expired"
+    });
+  });
+
+  it("resets cache break comparison after a 25-hour idle gap", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexIdleGapCacheDropRollout(fixture.rolloutPath, fixture.rootDir, "2026-03-15T11:00:02.000Z");
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+
+    expect(readCacheBreakRows(fixture.config.monitorDbPath)).toEqual([]);
+  });
+
+  it("removes stale cache break rows when rollout turns are deleted", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexAlternatingCacheBreakRollout(fixture.rolloutPath, fixture.rootDir, 5);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    expect(readCacheBreakRows(fixture.config.monitorDbPath).map((event) => event.turn_index)).toEqual([1, 3, 5, 7, 9]);
+
+    writeCodexAlternatingCacheBreakRollout(fixture.rolloutPath, fixture.rootDir, 2);
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(1);
+    expect(readCacheBreakRows(fixture.config.monitorDbPath).map((event) => event.turn_index)).toEqual([1, 3]);
+  });
+
+  it("reprocesses a zero-event rollout when only the break parse state is stale", () => {
+    const fixture = createTestFixture();
+    fixtures.push(fixture);
+
+    const codex = new CodexDataService(fixture.config);
+    const collector = new TokenCollectorService(fixture.config, [codex]);
+    writeCodexNoCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+
+    collector.captureSnapshot(new Date("2026-03-14T20:00:00+09:00"));
+    expect(readCacheBreakRows(fixture.config.monitorDbPath)).toEqual([]);
+
+    writeCodexCacheBreakRollout(fixture.rolloutPath, fixture.rootDir);
+    markBreakParseVersionStaleWithoutChangingRolloutState(fixture.config.monitorDbPath, fixture.rolloutPath);
+
+    const result = collector.captureSnapshot(new Date("2026-03-14T20:01:00+09:00"));
+
+    expect(result.stats.updatedRollouts).toBe(0);
+    const events = readCacheBreakRows(fixture.config.monitorDbPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      rollout_path: fixture.rolloutPath,
+      turn_index: 1,
+      parse_version: BREAK_PARSE_VERSION
+    });
+  });
+
   it("aggregates token_count events in rollout logs into daily and hourly usage", () => {
     const fixture = createTestFixture();
     fixtures.push(fixture);
@@ -1761,6 +2107,208 @@ function writeTokenTimeline(rolloutPath: string, events: Array<[timestamp: strin
   fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
 }
 
+function writeCodexCacheBreakRollout(rolloutPath: string, rootDir: string): void {
+  writeCodexTwoTurnRollout(rolloutPath, rootDir, {
+    firstTimestamp: "2026-03-14T10:00:02.000Z",
+    secondTimestamp: "2026-03-14T10:01:00.000Z",
+    secondCachedInputTokens: 100
+  });
+}
+
+function writeCodexNoCacheBreakRollout(rolloutPath: string, rootDir: string): void {
+  writeCodexTwoTurnRollout(rolloutPath, rootDir, {
+    firstTimestamp: "2026-03-14T10:00:02.000Z",
+    secondTimestamp: "2026-03-14T10:01:00.000Z",
+    secondCachedInputTokens: 850
+  });
+}
+
+function writeCodexIdleGapCacheDropRollout(rolloutPath: string, rootDir: string, secondTimestamp: string): void {
+  writeCodexTwoTurnRollout(rolloutPath, rootDir, {
+    firstTimestamp: "2026-03-14T10:00:02.000Z",
+    secondTimestamp,
+    secondCachedInputTokens: 100
+  });
+}
+
+function writeCodexAlternatingCacheBreakRollout(rolloutPath: string, rootDir: string, eventCount: number): void {
+  const cwd = path.join(rootDir, "workspace", "demo-project", "packages", "client");
+  const lines: Array<Record<string, unknown>> = [
+    {
+      timestamp: "2026-03-14T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        cwd,
+        cli_version: "0.114.0",
+        model_provider: "openai",
+        base_instructions: "Stable system prompt"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:01.000Z",
+      type: "turn_context",
+      payload: {
+        cwd,
+        model: "gpt-5.4"
+      }
+    }
+  ];
+  let cumulativeInputTokens = 0;
+  let cumulativeCachedInputTokens = 0;
+  let cumulativeOutputTokens = 0;
+  const turnCount = eventCount * 2;
+
+  for (let turn = 0; turn < turnCount; turn += 1) {
+    const cachedInputTokens = turn % 2 === 0 ? 900 : 100;
+    cumulativeInputTokens += 1000;
+    cumulativeCachedInputTokens += cachedInputTokens;
+    cumulativeOutputTokens += 50;
+    lines.push({
+      timestamp: `2026-03-14T10:${String(turn + 1).padStart(2, "0")}:02.000Z`,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: cumulativeInputTokens,
+            cached_input_tokens: cumulativeCachedInputTokens,
+            output_tokens: cumulativeOutputTokens,
+            total_tokens: cumulativeInputTokens + cumulativeOutputTokens
+          },
+          last_token_usage: {
+            input_tokens: 1000,
+            cached_input_tokens: cachedInputTokens,
+            output_tokens: 50,
+            total_tokens: 1050
+          }
+        }
+      }
+    });
+  }
+
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
+function writeCodexTwoTurnRollout(
+  rolloutPath: string,
+  rootDir: string,
+  input: {
+    firstTimestamp: string;
+    secondTimestamp: string;
+    secondCachedInputTokens: number;
+  }
+): void {
+  const cwd = path.join(rootDir, "workspace", "demo-project", "packages", "client");
+  const lines: Array<Record<string, unknown>> = [
+    {
+      timestamp: "2026-03-14T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        cwd,
+        cli_version: "0.114.0",
+        model_provider: "openai",
+        base_instructions: "Stable system prompt"
+      }
+    },
+    {
+      timestamp: "2026-03-14T10:00:01.000Z",
+      type: "turn_context",
+      payload: {
+        cwd,
+        model: "gpt-5.4"
+      }
+    },
+    {
+      timestamp: input.firstTimestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 1000,
+            cached_input_tokens: 900,
+            output_tokens: 50,
+            total_tokens: 1050
+          },
+          last_token_usage: {
+            input_tokens: 1000,
+            cached_input_tokens: 900,
+            output_tokens: 50,
+            total_tokens: 1050
+          }
+        }
+      }
+    },
+    {
+      timestamp: input.secondTimestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 2000,
+            cached_input_tokens: 1000,
+            output_tokens: 100,
+            total_tokens: 2100
+          },
+          last_token_usage: {
+            input_tokens: 1000,
+            cached_input_tokens: input.secondCachedInputTokens,
+            output_tokens: 50,
+            total_tokens: 1050
+          }
+        }
+      }
+    }
+  ];
+
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
+function writeClaudeCodeCacheBreakTranscript(rolloutPath: string): void {
+  const lines: Array<Record<string, unknown>> = [
+    {
+      type: "session_meta",
+      timestamp: "2026-03-18T01:00:00.000Z",
+      base_instructions: "Stable Claude system prompt"
+    },
+    {
+      type: "assistant",
+      timestamp: "2026-03-18T01:00:05.000Z",
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-6",
+        usage: {
+          input_tokens: 100,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 900,
+          ephemeral_5m_input_tokens: 0,
+          ephemeral_1h_input_tokens: 0,
+          output_tokens: 10
+        }
+      }
+    },
+    {
+      type: "assistant",
+      timestamp: "2026-03-18T01:01:05.000Z",
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-6",
+        usage: {
+          input_tokens: 900,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 100,
+          ephemeral_5m_input_tokens: 0,
+          ephemeral_1h_input_tokens: 0,
+          output_tokens: 10
+        }
+      }
+    }
+  ];
+
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+}
+
 function insertHourlyUsage(
   database: DatabaseSync,
   input: {
@@ -1811,6 +2359,148 @@ function insertHourlyUsage(
     0,
     input.requestCount ?? 1
   );
+}
+
+interface CacheBreakEventRow {
+  rollout_path: string;
+  turn_index: number;
+  ts: number;
+  local_date: string;
+  provider: string;
+  model: string;
+  prev_hit_rate: number;
+  curr_hit_rate: number;
+  dropped_pp: number;
+  primary_cause: string;
+  confidence: string;
+  evidence_json: string;
+  parse_version: string;
+}
+
+function readCacheBreakRows(monitorDbPath: string): CacheBreakEventRow[] {
+  const database = new DatabaseSync(monitorDbPath);
+  const rows = database.prepare(`
+    SELECT
+      rollout_path,
+      turn_index,
+      ts,
+      local_date,
+      provider,
+      model,
+      prev_hit_rate,
+      curr_hit_rate,
+      dropped_pp,
+      primary_cause,
+      confidence,
+      evidence_json,
+      parse_version
+    FROM cache_break_event
+    ORDER BY rollout_path ASC, turn_index ASC
+  `).all() as unknown as CacheBreakEventRow[];
+  database.close();
+  return rows;
+}
+
+function overwriteCacheBreakEvidence(
+  monitorDbPath: string,
+  rolloutPath: string,
+  input: {
+    evidenceJson: string;
+    parseVersion: string;
+  }
+): void {
+  const database = new DatabaseSync(monitorDbPath);
+  database.prepare(`
+    UPDATE cache_break_event
+    SET evidence_json = ?,
+        parse_version = ?
+    WHERE rollout_path = ?
+  `).run(input.evidenceJson, input.parseVersion, rolloutPath);
+  database.close();
+}
+
+function insertSyntheticCacheBreakRow(monitorDbPath: string, rolloutPath: string, turnIndex: number): void {
+  const database = new DatabaseSync(monitorDbPath);
+  database.prepare(`
+    INSERT INTO cache_break_event (
+      rollout_path,
+      turn_index,
+      ts,
+      local_date,
+      provider,
+      model,
+      prev_hit_rate,
+      curr_hit_rate,
+      dropped_pp,
+      primary_cause,
+      confidence,
+      evidence_json,
+      parse_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    rolloutPath,
+    turnIndex,
+    new Date("2026-03-14T10:02:00.000Z").getTime(),
+    "2026-03-14",
+    "codex",
+    "gpt-5.4",
+    0.9,
+    0.1,
+    0.8,
+    "unknown",
+    "low",
+    JSON.stringify({ sentinel: true }),
+    BREAK_PARSE_VERSION
+  );
+  database.close();
+}
+
+function markRolloutParseVersionStale(monitorDbPath: string, rolloutPath: string): void {
+  const database = new DatabaseSync(monitorDbPath);
+  database.prepare(`
+    UPDATE rollout_index_state
+    SET parse_version = ?
+    WHERE rollout_path = ?
+  `).run("rollout-parse-v0", rolloutPath);
+  database.close();
+}
+
+function markBreakParseVersionStaleWithoutChangingRolloutState(monitorDbPath: string, rolloutPath: string): void {
+  const stats = fs.statSync(rolloutPath);
+  const database = new DatabaseSync(monitorDbPath);
+  database.prepare(`
+    UPDATE rollout_index_state
+    SET file_size = ?,
+        mtime_ms = ?,
+        break_parse_version = ?
+    WHERE rollout_path = ?
+  `).run(stats.size, Math.trunc(stats.mtimeMs), "break-parse-v0", rolloutPath);
+  database.close();
+}
+
+function readRolloutUsageSummary(monitorDbPath: string, rolloutPath: string): {
+  rowCount: number;
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+} {
+  const database = new DatabaseSync(monitorDbPath);
+  const row = database.prepare(`
+    SELECT
+      COUNT(*) AS rowCount,
+      COALESCE(SUM(total_tokens), 0) AS totalTokens,
+      COALESCE(SUM(input_tokens), 0) AS inputTokens,
+      COALESCE(SUM(cached_input_tokens), 0) AS cachedInputTokens
+    FROM rollout_hourly_usage
+    WHERE rollout_path = ?
+  `).get(rolloutPath) as {
+    rowCount: number;
+    totalTokens: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+  };
+  database.close();
+  return row;
 }
 
 function readToolAttributionRows(monitorDbPath: string): Array<{

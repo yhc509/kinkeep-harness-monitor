@@ -1,0 +1,36 @@
+{
+  "provider": "claude_code",
+  "prevTurn": {
+    "ts": 1776686400000,
+    "model": "claude-opus-4-7",
+    "provider": "claude_code",
+    "totalInputTokens": 50000,
+    "cachedInputTokens": 46000,
+    "cacheReadInputTokens": 46000,
+    "cacheCreationInputTokens": 1800,
+    "ephemeral5mInputTokens": 1800,
+    "ephemeral1hInputTokens": 0,
+    "baseInstructionsHash": "sha256:claude-base-a",
+    "hitRate": 0.92
+  },
+  "currTurn": {
+    "ts": 1776686765000,
+    "model": "claude-opus-4-7",
+    "provider": "claude_code",
+    "totalInputTokens": 50000,
+    "cachedInputTokens": 6000,
+    "cacheReadInputTokens": 6000,
+    "cacheCreationInputTokens": 43000,
+    "ephemeral5mInputTokens": 43000,
+    "ephemeral1hInputTokens": 0,
+    "baseInstructionsHash": "sha256:claude-base-a",
+    "hitRate": 0.12
+  },
+  "expected": {
+    "isBreak": true,
+    "primaryCause": "ttl_expired",
+    "confidence": "high",
+    "droppedPp": 0.8
+  },
+  "notes": "synthetic: idle gap is just over 5 minutes and cache_read_input_tokens collapses."
+}

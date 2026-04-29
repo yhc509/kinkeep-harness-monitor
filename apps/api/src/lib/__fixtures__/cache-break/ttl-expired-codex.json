@@ -1,0 +1,36 @@
+{
+  "provider": "codex",
+  "prevTurn": {
+    "ts": 1776686400000,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 30000,
+    "cachedInputTokens": 27000,
+    "cacheReadInputTokens": 27000,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0.9
+  },
+  "currTurn": {
+    "ts": 1776686765000,
+    "model": "gpt-5.4",
+    "provider": "codex",
+    "totalInputTokens": 32000,
+    "cachedInputTokens": 3200,
+    "cacheReadInputTokens": 3200,
+    "cacheCreationInputTokens": null,
+    "ephemeral5mInputTokens": null,
+    "ephemeral1hInputTokens": null,
+    "baseInstructionsHash": "sha256:codex-base-a",
+    "hitRate": 0.1
+  },
+  "expected": {
+    "isBreak": true,
+    "primaryCause": "ttl_expired",
+    "confidence": "low",
+    "droppedPp": 0.8
+  },
+  "notes": "synthetic: Codex idle signal plus a large cache hit-rate drop; confidence stays low because TTL precision is unavailable."
+}
