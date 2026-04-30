@@ -611,10 +611,9 @@ pre {
 }
 
 .cache-trend-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  display: flex;
+  flex-direction: column;
   gap: 18px;
-  align-items: start;
   min-width: 0;
 }
 
@@ -700,8 +699,8 @@ pre {
 
 .cache-break-side-panel {
   min-width: 0;
-  padding-left: 16px;
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .cache-break-side-header {
@@ -744,6 +743,58 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.cache-break-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.cache-break-pagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.cache-break-pagination button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.cache-break-pagination button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #041017;
+}
+
+.cache-break-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.cache-break-pagination .page-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  opacity: 0.5;
 }
 
 .cache-break-card {
@@ -2961,20 +3012,9 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .cache-trend-layout {
-    grid-template-columns: 1fr;
-  }
-
   .tools-attribution-grid,
   .subagent-attribution-layout {
     grid-template-columns: 1fr;
-  }
-
-  .cache-break-side-panel {
-    padding-top: 14px;
-    padding-left: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    border-left: 0;
   }
 
   .memory-provider-columns {
