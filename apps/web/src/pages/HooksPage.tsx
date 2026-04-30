@@ -23,7 +23,7 @@ export function HooksPage() {
       cacheKey: apiResourceKeys.hookDetail(selectedHookId ?? ""),
       enabled: Boolean(selectedHookId),
       keepPreviousData: false,
-      staleTimeMs: 60_000
+      staleTimeMs: 300_000
     }
   );
 

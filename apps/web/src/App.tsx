@@ -35,10 +35,10 @@ export function App() {
     let delayedIntegrationsPrefetchId: number | null = null;
     const prefetch = () => {
       void prefetchAllRoutes();
-      void prefetchApiResource(apiResourceKeys.overview, () => getOverview(), { staleTimeMs: 10_000 });
-      void prefetchApiResource(apiResourceKeys.tokens(7), () => getTokens(7), { staleTimeMs: 10_000 });
-      void prefetchApiResource(apiResourceKeys.projects(""), () => getProjects(""), { staleTimeMs: 10_000 });
-      void prefetchApiResource(apiResourceKeys.memory, () => getMemory(), { staleTimeMs: 15_000 });
+      void prefetchApiResource(apiResourceKeys.overview, () => getOverview(), { staleTimeMs: 300_000 });
+      void prefetchApiResource(apiResourceKeys.tokens(7), () => getTokens(7), { staleTimeMs: 300_000 });
+      void prefetchApiResource(apiResourceKeys.projects(""), () => getProjects(""), { staleTimeMs: 300_000 });
+      void prefetchApiResource(apiResourceKeys.memory, () => getMemory(), { staleTimeMs: 300_000 });
 
       delayedIntegrationsPrefetchId = browserWindow.setTimeout(() => {
         void prefetchApiResource(apiResourceKeys.integrations, () => getIntegrations(), { staleTimeMs: 0 });

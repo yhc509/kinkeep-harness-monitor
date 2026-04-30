@@ -23,7 +23,7 @@ export function SkillsPage() {
       cacheKey: apiResourceKeys.skillDetail(selectedSkillId ?? ""),
       enabled: Boolean(selectedSkillId),
       keepPreviousData: false,
-      staleTimeMs: 60_000
+      staleTimeMs: 300_000
     }
   );
 

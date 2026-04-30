@@ -12,7 +12,7 @@ export function DashboardPage() {
   const overview = useApiResource(() => getOverview(), {
     deps: [],
     cacheKey: apiResourceKeys.overview,
-    staleTimeMs: 10_000
+    staleTimeMs: 300_000
   });
   const cacheSavingsCopy = overview.data
     ? overview.data.cacheSavings.savedCost >= 0

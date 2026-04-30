@@ -17,7 +17,7 @@ export function CachePage() {
   const tokens = useApiResource(() => getTokens(range), {
     deps: [range],
     cacheKey: apiResourceKeys.tokens(range),
-    staleTimeMs: 5_000
+    staleTimeMs: 300_000
   });
 
   async function handleSync() {

@@ -41,7 +41,7 @@ export function SessionsPage() {
       deps: [isProjectBrowser, params.projectId, deferredSearch],
       cacheKey: apiResourceKeys.projects(isProjectBrowser ? deferredSearch : ""),
       enabled: isProjectBrowser || Boolean(params.projectId),
-      staleTimeMs: 15_000
+      staleTimeMs: 300_000
     }
   );
   const sessions = useApiResource(
@@ -52,7 +52,7 @@ export function SessionsPage() {
       deps: [includeSubagents, isSessionBrowser, params.projectId, deferredSearch],
       cacheKey: apiResourceKeys.sessions({ projectId: params.projectId, query: deferredSearch, includeSubagents }),
       enabled: isSessionBrowser && Boolean(params.projectId),
-      staleTimeMs: 10_000
+      staleTimeMs: 300_000
     }
   );
   const detail = useApiResource(
@@ -62,7 +62,7 @@ export function SessionsPage() {
       cacheKey: apiResourceKeys.sessionDetail(params.sessionId ?? ""),
       enabled: Boolean(params.sessionId),
       keepPreviousData: false,
-      staleTimeMs: 10_000
+      staleTimeMs: 300_000
     }
   );
 

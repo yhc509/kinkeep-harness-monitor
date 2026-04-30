@@ -51,12 +51,12 @@ export function DailyCacheTrendSection() {
   const trend = useApiResource(() => getCacheTrend(range, provider), {
     deps: [range, provider],
     cacheKey: `tokens:cache-trend:${range}:${provider}`,
-    staleTimeMs: 5_000
+    staleTimeMs: 300_000
   });
   const breaks = useApiResource(() => getCacheBreaks(range, provider), {
     deps: [range, provider],
     cacheKey: `tokens:cache-breaks:${range}:${provider}`,
-    staleTimeMs: 5_000
+    staleTimeMs: 300_000
   });
   const points = trend.data?.points ?? [];
   const events = breaks.data?.events ?? [];

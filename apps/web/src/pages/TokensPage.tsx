@@ -60,12 +60,12 @@ export function TokensPage() {
   const tokens = useApiResource(() => getTokens(range), {
     deps: [range],
     cacheKey: apiResourceKeys.tokens(range),
-    staleTimeMs: 5_000
+    staleTimeMs: 300_000
   });
   const projectUsage = useApiResource(() => getProjectTokenUsage(projectUnit, projectAnchorDay), {
     deps: [projectUnit, projectAnchorDay],
     cacheKey: apiResourceKeys.projectTokenUsage(projectUnit, projectAnchorDay),
-    staleTimeMs: 5_000
+    staleTimeMs: 300_000
   });
   const hourlySeries = tokens.data?.hourly ?? [];
   const trailingSevenDays = tokens.data?.daily.slice(-7) ?? [];
