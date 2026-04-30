@@ -21,7 +21,7 @@ export function CacheBreakSidePanel({ events, selectedDate, onClearFilter }: Cac
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedDate]);
+  }, [selectedDate, events]);
 
   const totalPages = Math.max(1, Math.ceil(visibleEvents.length / PAGE_SIZE));
   const activePage = Math.min(currentPage, totalPages);
