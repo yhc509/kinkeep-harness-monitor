@@ -10,7 +10,7 @@ export function MemoryPage() {
   const memory = useApiResource(() => getMemory(), {
     deps: [],
     cacheKey: apiResourceKeys.memory,
-    staleTimeMs: 15_000
+    staleTimeMs: 300_000
   });
   const providerGroups = (memory.data?.providerConfigs ?? []).map((config) => ({
     provider: config.provider,
