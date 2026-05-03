@@ -27,8 +27,12 @@
   --provider-agents-soft: #2b8a5e;
   --provider-agents-bg: rgba(67, 211, 146, 0.08);
   --provider-agents-border: rgba(67, 211, 146, 0.24);
-  --tool-token-input: rgba(84, 210, 255, 0.28);
-  --tool-token-output: #54d2ff;
+  --tool-token-input-claude: rgba(255, 180, 84, 0.28);
+  --tool-token-output-claude: #ffb454;
+  --tool-token-input-codex: rgba(84, 210, 255, 0.28);
+  --tool-token-output-codex: #54d2ff;
+  --tool-token-input: var(--tool-token-input-codex);
+  --tool-token-output: var(--tool-token-output-codex);
   --success: #43d392;
   --warning: #ffb454;
   --danger: #ff6b6b;
@@ -1019,14 +1023,6 @@ pre {
   text-transform: uppercase;
 }
 
-.tools-attribution-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
-  gap: 14px;
-  align-items: start;
-  min-width: 0;
-}
-
 .tool-attribution-scroll {
   width: 100%;
   max-width: 100%;
@@ -1069,23 +1065,43 @@ pre {
   background: var(--tool-token-output);
 }
 
-.subagent-attribution-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 14px;
-  align-items: start;
-  min-width: 0;
+.token-attribution-legend .input-swatch.provider-claude-code {
+  background: var(--tool-token-input-claude);
 }
 
-.subagent-attribution-summary,
-.subagent-top-list {
-  min-width: 0;
+.token-attribution-legend .output-swatch.provider-claude-code {
+  background: var(--tool-token-output-claude);
+}
+
+.token-attribution-legend .input-swatch.provider-codex {
+  background: var(--tool-token-input-codex);
+}
+
+.token-attribution-legend .output-swatch.provider-codex {
+  background: var(--tool-token-output-codex);
+}
+
+.token-attribution-legend .input-swatch.provider-all {
+  background: linear-gradient(
+    90deg,
+    var(--tool-token-input-claude) 0 50%,
+    var(--tool-token-input-codex) 50% 100%
+  );
+}
+
+.token-attribution-legend .output-swatch.provider-all {
+  background: linear-gradient(
+    90deg,
+    var(--tool-token-output-claude) 0 50%,
+    var(--tool-token-output-codex) 50% 100%
+  );
 }
 
 .subagent-attribution-summary {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .subagent-attribution-note {
@@ -1133,106 +1149,18 @@ pre {
 }
 
 .subagent-attribution-summary .subagent-summary-card span,
-.subagent-attribution-summary .subagent-summary-card p,
-.subagent-attribution-row p,
-.subagent-attribution-value span {
+.subagent-attribution-summary .subagent-summary-card p {
   color: var(--text-soft);
   font-size: 0.74rem;
 }
 
-.subagent-attribution-summary .subagent-summary-card strong,
-.subagent-attribution-value strong {
+.subagent-attribution-summary .subagent-summary-card strong {
   overflow-wrap: anywhere;
 }
 
 .subagent-attribution-summary .subagent-summary-card p {
   margin: 0;
   line-height: 1.35;
-}
-
-.subagent-top-list {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.subagent-attribution-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.subagent-attribution-row:last-child {
-  border-bottom: 0;
-}
-
-.subagent-attribution-main,
-.subagent-attribution-value {
-  min-width: 0;
-}
-
-.subagent-attribution-main {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.subagent-attribution-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.subagent-attribution-title strong {
-  overflow-wrap: anywhere;
-}
-
-.subagent-attribution-row p {
-  margin: 0;
-}
-
-.subagent-attribution-value {
-  display: flex;
-  align-items: flex-end;
-  flex-direction: column;
-  gap: 4px;
-  flex: 0 0 auto;
-  text-align: right;
-}
-
-.attribution-estimated-badge {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: 4px 7px;
-  border: 1px solid var(--provider-codex-border);
-  border-radius: 999px;
-  background: var(--provider-codex-bg);
-  color: var(--provider-codex);
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.68rem;
-  line-height: 1.1;
-}
-
-.subagent-attribution-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 124px;
-  border: 1px dashed rgba(255, 255, 255, 0.09);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-soft);
-  font-size: 0.82rem;
-  text-align: center;
 }
 
 .icon-button {
@@ -3012,11 +2940,6 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .tools-attribution-grid,
-  .subagent-attribution-layout {
-    grid-template-columns: 1fr;
-  }
-
   .memory-provider-columns {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -3326,15 +3249,6 @@ pre {
 
   .subagent-summary-grid {
     grid-template-columns: 1fr;
-  }
-
-  .subagent-attribution-row {
-    flex-direction: column;
-  }
-
-  .subagent-attribution-value {
-    align-items: flex-start;
-    text-align: left;
   }
 
   .modal-backdrop {

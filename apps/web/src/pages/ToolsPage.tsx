@@ -127,29 +127,27 @@ export function ToolsPage() {
         ) : null}
       </AsyncPane>
 
-      <div className="tools-attribution-grid">
-        <AsyncPane
-          loading={toolAttribution.initialLoading}
-          error={toolAttribution.error}
-          hasData={toolAttribution.hasData}
-        >
-          {toolAttribution.data ? (
-            <ToolAttributionPanel
-              data={toolAttribution.data.tools}
-              provider={provider}
-              range={range}
-            />
-          ) : null}
-        </AsyncPane>
+      <AsyncPane
+        loading={toolAttribution.initialLoading}
+        error={toolAttribution.error}
+        hasData={toolAttribution.hasData}
+      >
+        {toolAttribution.data ? (
+          <ToolAttributionPanel
+            data={toolAttribution.data.tools}
+            provider={provider}
+            range={range}
+          />
+        ) : null}
+      </AsyncPane>
 
-        <AsyncPane
-          loading={subagentAttribution.initialLoading}
-          error={subagentAttribution.error}
-          hasData={subagentAttribution.hasData}
-        >
-          {subagentAttribution.data ? <SubagentAttributionPanel data={subagentAttribution.data} /> : null}
-        </AsyncPane>
-      </div>
+      <AsyncPane
+        loading={subagentAttribution.initialLoading}
+        error={subagentAttribution.error}
+        hasData={subagentAttribution.hasData}
+      >
+        {subagentAttribution.data ? <SubagentAttributionPanel data={subagentAttribution.data} /> : null}
+      </AsyncPane>
     </div>
   );
 }

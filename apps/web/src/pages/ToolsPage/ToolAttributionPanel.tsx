@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Provider, ToolAttributionEntry } from "@codex-monitor/shared";
 import { Boxes } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { TokenAttributionProvider, TokenAttributionRange } from "../../api";
 import { Panel } from "../../components/Panel";
 import { formatNumber } from "../../utils/format";
@@ -39,6 +39,7 @@ const TOP_TOOL_LIMIT = 10;
 export function ToolAttributionPanel({ data, provider, range }: ToolAttributionPanelProps) {
   const chartData = useMemo(() => buildChartRows(data), [data]);
   const chartHeight = Math.max(260, chartData.length * 38 + 58);
+  const legendSwatchClass = getLegendSwatchClass(provider);
 
   return (
     <Panel
@@ -48,8 +49,8 @@ export function ToolAttributionPanel({ data, provider, range }: ToolAttributionP
       actions={(
         <>
           <div className="token-attribution-legend" aria-hidden="true">
-            <span><i className="input-swatch" />Input</span>
-            <span><i className="output-swatch" />Output</span>
+            <span><i className={`input-swatch ${legendSwatchClass}`} />Input</span>
+            <span><i className={`output-swatch ${legendSwatchClass}`} />Output</span>
           </div>
           <span className="panel-badge muted-badge">{formatProviderFilterLabel(provider)}</span>
         </>
@@ -90,7 +91,11 @@ export function ToolAttributionPanel({ data, provider, range }: ToolAttributionP
                   fill="var(--tool-token-input)"
                   radius={[7, 0, 0, 7]}
                   maxBarSize={22}
-                />
+                >
+                  {chartData.map((entry) => (
+                    <Cell key={`${entry.key}:input`} fill={getInputColor(entry.provider)} />
+                  ))}
+                </Bar>
                 <Bar
                   dataKey="outputTokens"
                   name="Output tokens"
@@ -99,6 +104,9 @@ export function ToolAttributionPanel({ data, provider, range }: ToolAttributionP
                   radius={[0, 7, 7, 0]}
                   maxBarSize={22}
                 >
+                  {chartData.map((entry) => (
+                    <Cell key={`${entry.key}:output`} fill={getOutputColor(entry.provider)} />
+                  ))}
                   <LabelList
                     dataKey="totalTokens"
                     position="right"
@@ -209,6 +217,42 @@ function formatProviderFilterLabel(provider: TokenAttributionProvider): string {
   }
 
   return formatProviderLabel(provider);
+}
+
+function getInputColor(provider: AttributionProviderLabel): string {
+  if (provider === "claude_code") {
+    return "var(--tool-token-input-claude)";
+  }
+
+  if (provider === "codex") {
+    return "var(--tool-token-input-codex)";
+  }
+
+  return "rgba(124, 95, 203, 0.28)";
+}
+
+function getOutputColor(provider: AttributionProviderLabel): string {
+  if (provider === "claude_code") {
+    return "var(--tool-token-output-claude)";
+  }
+
+  if (provider === "codex") {
+    return "var(--tool-token-output-codex)";
+  }
+
+  return "var(--accent)";
+}
+
+function getLegendSwatchClass(provider: TokenAttributionProvider): string {
+  if (provider === "claude_code") {
+    return "provider-claude-code";
+  }
+
+  if (provider === "codex") {
+    return "provider-codex";
+  }
+
+  return "provider-all";
 }
 
 function formatChartNumber(value: unknown): string {
