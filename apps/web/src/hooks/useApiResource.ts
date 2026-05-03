@@ -23,7 +23,112 @@ interface ResourceCacheEntry<T> {
   promise: Promise<T> | null;
 }
 
+type PersistedResourceCacheEntry = Pick<ResourceCacheEntry<unknown>, "data" | "error" | "updatedAt">;
+
+const RESOURCE_STORAGE_PREFIX = "harness-monitor:resource:";
 const resourceCache = new Map<string, ResourceCacheEntry<unknown>>();
+
+function getResourceStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function getResourceStorageKey(cacheKey: string): string {
+  return `${RESOURCE_STORAGE_PREFIX}${cacheKey}`;
+}
+
+function isPersistedResourceEntry(value: unknown): value is PersistedResourceCacheEntry {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const entry = value as Partial<PersistedResourceCacheEntry>;
+  return (
+    "data" in entry &&
+    typeof entry.updatedAt === "number" &&
+    (entry.error === null || typeof entry.error === "string")
+  );
+}
+
+function hydrateResourceCacheFromStorage() {
+  const storage = getResourceStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    for (let i = 0; i < storage.length; i += 1) {
+      const storageKey = storage.key(i);
+      if (!storageKey?.startsWith(RESOURCE_STORAGE_PREFIX)) {
+        continue;
+      }
+
+      const rawEntry = storage.getItem(storageKey);
+      if (!rawEntry) {
+        continue;
+      }
+
+      try {
+        const persistedEntry = JSON.parse(rawEntry) as unknown;
+        if (!isPersistedResourceEntry(persistedEntry)) {
+          continue;
+        }
+
+        resourceCache.set(storageKey.slice(RESOURCE_STORAGE_PREFIX.length), {
+          data: persistedEntry.data,
+          error: persistedEntry.error,
+          updatedAt: persistedEntry.updatedAt,
+          promise: null
+        });
+      } catch {
+        // Ignore corrupt persisted cache entries.
+        continue;
+      }
+    }
+  } catch {
+    // Ignore storage access failures.
+  }
+}
+
+function writeResourceCacheEntry(cacheKey: string, entry: ResourceCacheEntry<unknown>) {
+  const storage = getResourceStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    const persistedEntry: PersistedResourceCacheEntry = {
+      data: entry.data,
+      error: entry.error,
+      updatedAt: entry.updatedAt
+    };
+    storage.setItem(getResourceStorageKey(cacheKey), JSON.stringify(persistedEntry));
+  } catch {
+    // Ignore storage quota and serialization failures.
+  }
+}
+
+function removeResourceCacheEntry(cacheKey: string) {
+  const storage = getResourceStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.removeItem(getResourceStorageKey(cacheKey));
+  } catch {
+    // Ignore storage access failures.
+  }
+}
+
+hydrateResourceCacheFromStorage();
 
 function getCacheEntry<T>(cacheKey: string): ResourceCacheEntry<T> | undefined {
   return resourceCache.get(cacheKey) as ResourceCacheEntry<T> | undefined;
@@ -99,6 +204,7 @@ function resolveResource<T>(
       entry.data = data;
       entry.error = null;
       entry.updatedAt = Date.now();
+      writeResourceCacheEntry(cacheKey, entry);
       return data;
     })
     .catch((error) => {
@@ -127,6 +233,7 @@ export function prefetchApiResource<T>(
 
 export function invalidateApiResource(cacheKey: string) {
   resourceCache.delete(cacheKey);
+  removeResourceCacheEntry(cacheKey);
 }
 
 export function useApiResource<T>(
