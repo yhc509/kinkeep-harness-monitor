@@ -2,14 +2,14 @@ import { useState } from "react";
 import type { TokenPeriodUnit } from "@codex-monitor/shared";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw } from "lucide-react";
-import { apiResourceKeys, createSnapshot, getProjectTokenUsage, getTokens } from "../api";
+import { apiResourceKeys, getProjectTokenUsage, getTokens } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
 import { ModelUsageDonutChart } from "../components/ModelUsageDonutChart";
 import { Panel } from "../components/Panel";
 import { ProjectBubbleChart } from "../components/ProjectBubbleChart";
 import { StatStrip } from "../components/StatStrip";
 import { StatusPill } from "../components/StatusPill";
-import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
+import { useApiResource } from "../hooks/useApiResource";
 import { formatCurrency, formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
 
 const ranges = [7, 30, 90];
@@ -56,7 +56,6 @@ export function TokensPage() {
   const [range, setRange] = useState(7);
   const [projectUnit, setProjectUnit] = useState<TokenPeriodUnit>("day");
   const [projectAnchorDay, setProjectAnchorDay] = useState(() => formatLocalDayKey(new Date()));
-  const [syncBusy, setSyncBusy] = useState(false);
   const tokens = useApiResource(() => getTokens(range), {
     deps: [range],
     cacheKey: apiResourceKeys.tokens(range),
@@ -87,18 +86,6 @@ export function TokensPage() {
     : 0;
   const activeProjectAnchorDay = projectUsage.data?.anchorDay ?? projectAnchorDay;
 
-  async function handleSync() {
-    try {
-      setSyncBusy(true);
-      await createSnapshot();
-      invalidateApiResource(apiResourceKeys.overview);
-      tokens.refresh();
-      projectUsage.refresh();
-    } finally {
-      setSyncBusy(false);
-    }
-  }
-
   function handleProjectUnitChange(nextUnit: TokenPeriodUnit) {
     setProjectUnit(nextUnit);
     setProjectAnchorDay(formatLocalDayKey(new Date()));
@@ -118,24 +105,6 @@ export function TokensPage() {
         <div>
           <p className="eyebrow">TOKENS</p>
           <h2>Daily usage</h2>
-        </div>
-        <div className="inline-actions">
-          {tokens.data ? (
-            <div className="page-chip">
-              <Clock3 size={14} strokeWidth={2.2} />
-              <span>{formatDateTime(tokens.data.lastSyncedAt)}</span>
-            </div>
-          ) : null}
-          {tokens.refreshing ? (
-            <div className="page-chip loading-chip">
-              <RefreshCw size={14} strokeWidth={2.2} />
-              <span>Refreshing</span>
-            </div>
-          ) : null}
-          <button className="primary-button" disabled={syncBusy} onClick={handleSync}>
-            <RefreshCw size={14} strokeWidth={2.2} />
-            {syncBusy ? "Syncing" : "Sync now"}
-          </button>
         </div>
       </section>
 

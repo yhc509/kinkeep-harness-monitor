@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Clock3, Hammer, RefreshCw } from "lucide-react";
+import { Hammer } from "lucide-react";
 import {
   apiResourceKeys,
-  createSnapshot,
   getSubagentAttribution,
   getTokens,
   getToolAttribution,
@@ -12,8 +11,7 @@ import {
 import { AsyncPane } from "../components/AsyncPane";
 import { Panel } from "../components/Panel";
 import { ToolUsageChart } from "../components/ToolUsageChart";
-import { invalidateApiResource, useApiResource } from "../hooks/useApiResource";
-import { formatDateTime } from "../utils/format";
+import { useApiResource } from "../hooks/useApiResource";
 import { SubagentAttributionPanel } from "./ToolsPage/SubagentAttributionPanel";
 import { ToolAttributionPanel } from "./ToolsPage/ToolAttributionPanel";
 
@@ -27,7 +25,6 @@ const providers: Array<{ value: TokenAttributionProvider; label: string }> = [
 export function ToolsPage() {
   const [range, setRange] = useState<TokenAttributionRange>(7);
   const [provider, setProvider] = useState<TokenAttributionProvider>("all");
-  const [syncBusy, setSyncBusy] = useState(false);
   const tokens = useApiResource(() => getTokens(range), {
     deps: [range],
     cacheKey: apiResourceKeys.tokens(range),
@@ -44,43 +41,12 @@ export function ToolsPage() {
     staleTimeMs: 300_000
   });
 
-  async function handleSync() {
-    try {
-      setSyncBusy(true);
-      await createSnapshot();
-      invalidateApiResource(apiResourceKeys.overview);
-      tokens.refresh();
-      toolAttribution.refresh();
-      subagentAttribution.refresh();
-    } finally {
-      setSyncBusy(false);
-    }
-  }
-
   return (
     <div className="page-stack">
       <section className="page-heading">
         <div>
           <p className="eyebrow">TOOLS</p>
           <h2>Tool usage breakdown</h2>
-        </div>
-        <div className="inline-actions">
-          {tokens.data ? (
-            <div className="page-chip">
-              <Clock3 size={14} strokeWidth={2.2} />
-              <span>{formatDateTime(tokens.data.lastSyncedAt)}</span>
-            </div>
-          ) : null}
-          {tokens.refreshing || toolAttribution.refreshing || subagentAttribution.refreshing ? (
-            <div className="page-chip loading-chip">
-              <RefreshCw size={14} strokeWidth={2.2} />
-              <span>Refreshing</span>
-            </div>
-          ) : null}
-          <button className="primary-button" disabled={syncBusy} onClick={handleSync}>
-            <RefreshCw size={14} strokeWidth={2.2} />
-            {syncBusy ? "Syncing" : "Sync now"}
-          </button>
         </div>
       </section>
 

@@ -1,22 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  cacheBreaksResponseSchema,
-  cacheTrendResponseSchema,
-  type CacheBreaksResponse,
-  type CacheTrendResponse,
   type DailyCacheTrendPoint,
-  type Provider
 } from "@codex-monitor/shared";
 import { CalendarDays } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { apiResourceKeys, getCacheBreaks, getCacheTrend, type CacheTrendProvider, type CacheTrendRange } from "../../api";
 import { AsyncPane } from "../../components/AsyncPane";
 import { Panel } from "../../components/Panel";
 import { useApiResource } from "../../hooks/useApiResource";
 import { formatDay, formatNumber, formatPercent } from "../../utils/format";
 import { CacheBreakSidePanel } from "./CacheBreakSidePanel";
-
-type CacheTrendRange = "7d" | "30d";
-type CacheTrendProvider = "all" | Provider;
 
 interface ChartTooltipProps {
   active?: boolean;
@@ -50,12 +43,12 @@ export function DailyCacheTrendSection() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const trend = useApiResource(() => getCacheTrend(range, provider), {
     deps: [range, provider],
-    cacheKey: `tokens:cache-trend:${range}:${provider}`,
+    cacheKey: apiResourceKeys.cacheTrend(range, provider),
     staleTimeMs: 300_000
   });
   const breaks = useApiResource(() => getCacheBreaks(range, provider), {
     deps: [range, provider],
-    cacheKey: `tokens:cache-breaks:${range}:${provider}`,
+    cacheKey: apiResourceKeys.cacheBreaks(range, provider),
     staleTimeMs: 300_000
   });
   const points = trend.data?.points ?? [];
@@ -265,26 +258,4 @@ function CacheBreakDot({ cx, cy, payload, selectedDate, onSelectDate }: CacheBre
       <circle cx={cx} cy={cy} r={selected ? 3 : 2.5} />
     </g>
   );
-}
-
-async function getCacheTrend(range: CacheTrendRange, provider: CacheTrendProvider): Promise<CacheTrendResponse> {
-  const search = new URLSearchParams({ range, provider });
-  const response = await fetch(`/api/tokens/cache-trend?${search.toString()}`);
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return cacheTrendResponseSchema.parse(await response.json());
-}
-
-async function getCacheBreaks(range: CacheTrendRange, provider: CacheTrendProvider): Promise<CacheBreaksResponse> {
-  const search = new URLSearchParams({ range, provider });
-  const response = await fetch(`/api/tokens/cache-breaks?${search.toString()}`);
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return cacheBreaksResponseSchema.parse(await response.json());
 }
