@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { apiResourceKeys, getIntegrations, getMemory, getOverview, getProjects, getTokens } from "./api";
 import { AppShell } from "./components/AppShell";
+import { GlobalSyncChips } from "./components/GlobalSyncChips";
 import { prefetchApiResource } from "./hooks/useApiResource";
 import {
   loadDashboardPage,
@@ -67,7 +68,7 @@ export function App() {
   return (
     <Suspense fallback={<div className="route-fallback">Loading page</div>}>
       <Routes>
-        <Route element={<AppShell />}>
+        <Route element={<AppShell syncControls={<GlobalSyncChips />} />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/sessions" element={<SessionsPage />} />
           <Route path="/sessions/projects/:projectId" element={<SessionsPage />} />

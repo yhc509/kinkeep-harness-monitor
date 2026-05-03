@@ -24,9 +24,14 @@ interface ResourceCacheEntry<T> {
 }
 
 type PersistedResourceCacheEntry = Pick<ResourceCacheEntry<unknown>, "data" | "error" | "updatedAt">;
+type ResourceRefreshEvent = {
+  cacheKey: string;
+  force: boolean;
+};
 
 const RESOURCE_STORAGE_PREFIX = "harness-monitor:resource:";
 const resourceCache = new Map<string, ResourceCacheEntry<unknown>>();
+const resourceRefreshListeners = new Set<(event: ResourceRefreshEvent) => void>();
 
 function getResourceStorage(): Storage | null {
   if (typeof window === "undefined") {
@@ -236,6 +241,21 @@ export function invalidateApiResource(cacheKey: string) {
   removeResourceCacheEntry(cacheKey);
 }
 
+export function listApiResourceCacheKeys() {
+  return Array.from(resourceCache.keys());
+}
+
+export function refreshApiResource(cacheKey: string, options: { force?: boolean } = {}) {
+  const event: ResourceRefreshEvent = {
+    cacheKey,
+    force: options.force ?? true
+  };
+
+  for (const listener of resourceRefreshListeners) {
+    listener(event);
+  }
+}
+
 export function useApiResource<T>(
   loader: () => Promise<T>,
   options: UseApiResourceOptions
@@ -328,6 +348,19 @@ export function useApiResource<T>(
     });
     void load(false);
   }, [enabled, options.cacheKey, staleTimeMs, keepPreviousData, ...options.deps]);
+
+  useEffect(() => {
+    const listener = (event: ResourceRefreshEvent) => {
+      if (event.cacheKey === options.cacheKey) {
+        void load(event.force);
+      }
+    };
+
+    resourceRefreshListeners.add(listener);
+    return () => {
+      resourceRefreshListeners.delete(listener);
+    };
+  }, [options.cacheKey]);
 
   return {
     ...state,

@@ -1,15 +1,14 @@
 import { useState } from "react";
-import { Clock3, RefreshCw, Wrench } from "lucide-react";
-import { apiResourceKeys, getHookDetail, getIntegrations, refreshIntegrations } from "../api";
+import { Wrench } from "lucide-react";
+import { apiResourceKeys, getHookDetail, getIntegrations } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
 import { DetailModal } from "../components/DetailModal";
 import { Panel } from "../components/Panel";
 import { useApiResource } from "../hooks/useApiResource";
-import { formatDateTime, formatNumber } from "../utils/format";
+import { formatNumber } from "../utils/format";
 import { getSourceThemeClassName, getSourceThemeLabel } from "../utils/providerTheme";
 
 export function HooksPage() {
-  const [refreshBusy, setRefreshBusy] = useState(false);
   const [selectedHookId, setSelectedHookId] = useState<string | null>(null);
   const integrations = useApiResource(() => getIntegrations(), {
     deps: [],
@@ -27,16 +26,6 @@ export function HooksPage() {
     }
   );
 
-  async function handleRefresh() {
-    try {
-      setRefreshBusy(true);
-      await refreshIntegrations();
-      integrations.refresh();
-    } finally {
-      setRefreshBusy(false);
-    }
-  }
-
   return (
     <div className="page-stack">
       <section className="page-heading">
@@ -50,28 +39,8 @@ export function HooksPage() {
               <Wrench size={14} strokeWidth={2.2} />
               <span>{formatNumber(integrations.data.hooks.length)} Hooks</span>
             </div>
-            <div className="page-chip">
-              <Clock3 size={14} strokeWidth={2.2} />
-              <span>{formatDateTime(integrations.data.lastSyncedAt)}</span>
-            </div>
-            {integrations.refreshing || refreshBusy ? (
-              <div className="page-chip loading-chip">
-                <RefreshCw size={14} strokeWidth={2.2} />
-                <span>Refreshing</span>
-              </div>
-            ) : null}
-            {integrations.data.isStale ? (
-              <div className="page-chip stale-chip">
-                <RefreshCw size={14} strokeWidth={2.2} />
-                <span>Cache refresh pending</span>
-              </div>
-            ) : null}
           </div>
         ) : null}
-        <button className="ghost-button" disabled={refreshBusy} onClick={handleRefresh}>
-          <RefreshCw size={14} strokeWidth={2.2} />
-          {refreshBusy ? "Refreshing" : "Refresh now"}
-        </button>
       </section>
 
       <AsyncPane loading={integrations.initialLoading} error={integrations.error} hasData={integrations.hasData}>

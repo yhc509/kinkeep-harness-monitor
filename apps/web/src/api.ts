@@ -1,6 +1,8 @@
 import {
   SubagentAttributionResponseSchema,
   ToolAttributionResponseSchema,
+  cacheBreaksResponseSchema,
+  cacheTrendResponseSchema,
   hookDetailSchema,
   integrationsResponseSchema,
   memoryResponseSchema,
@@ -12,7 +14,8 @@ import {
   skillDetailSchema,
   tokenPeriodUnitSchema,
   tokenSyncResultSchema,
-  tokensResponseSchema
+  tokensResponseSchema,
+  type Provider
 } from "@codex-monitor/shared";
 import { z } from "zod";
 
@@ -20,6 +23,8 @@ const sessionListSchema = z.array(sessionListItemSchema);
 
 export type TokenAttributionRange = 7 | 30 | 90;
 export type TokenAttributionProvider = "all" | "claude_code" | "codex";
+export type CacheTrendRange = "7d" | "30d";
+export type CacheTrendProvider = "all" | Provider;
 
 export const apiResourceKeys = {
   overview: "overview",
@@ -42,7 +47,9 @@ export const apiResourceKeys = {
   subagentAttribution: (rangeDays: TokenAttributionRange, provider: TokenAttributionProvider) => (
     `subagent-attribution:${rangeDays}:${provider}`
   ),
-  projectTokenUsage: (unit: z.infer<typeof tokenPeriodUnitSchema>, anchorDay: string) => `project-token-usage:${unit}:${anchorDay}`
+  projectTokenUsage: (unit: z.infer<typeof tokenPeriodUnitSchema>, anchorDay: string) => `project-token-usage:${unit}:${anchorDay}`,
+  cacheTrend: (range: CacheTrendRange, provider: CacheTrendProvider) => `tokens:cache-trend:${range}:${provider}`,
+  cacheBreaks: (range: CacheTrendRange, provider: CacheTrendProvider) => `tokens:cache-breaks:${range}:${provider}`
 } as const;
 
 async function requestJson<T>(input: string, schema: z.ZodSchema<T>, init?: RequestInit): Promise<T> {
@@ -138,6 +145,16 @@ export function getSubagentAttribution(rangeDays: TokenAttributionRange, provide
     provider
   });
   return requestJson(`/api/tokens/subagent-attribution?${search.toString()}`, SubagentAttributionResponseSchema);
+}
+
+export function getCacheTrend(range: CacheTrendRange, provider: CacheTrendProvider) {
+  const search = new URLSearchParams({ range, provider });
+  return requestJson(`/api/tokens/cache-trend?${search.toString()}`, cacheTrendResponseSchema);
+}
+
+export function getCacheBreaks(range: CacheTrendRange, provider: CacheTrendProvider) {
+  const search = new URLSearchParams({ range, provider });
+  return requestJson(`/api/tokens/cache-breaks?${search.toString()}`, cacheBreaksResponseSchema);
 }
 
 export function createSnapshot() {

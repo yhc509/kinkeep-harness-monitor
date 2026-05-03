@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Brain, ChartColumnBig, Hammer, Layers, LayoutDashboard, MessagesSquare, PlugZap, Settings2, Wrench } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { prefetchRoute } from "../route-prefetch";
@@ -14,7 +15,11 @@ const navItems = [
   { to: "/cache", label: "Cache", icon: Layers }
 ];
 
-export function AppShell() {
+interface AppShellProps {
+  syncControls?: ReactNode;
+}
+
+export function AppShell({ syncControls }: AppShellProps) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -46,6 +51,7 @@ export function AppShell() {
       </aside>
 
       <main className="content">
+        {syncControls ? <div className="content-sync-row">{syncControls}</div> : null}
         <Outlet />
       </main>
     </div>

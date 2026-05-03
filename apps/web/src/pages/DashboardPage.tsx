@@ -27,20 +27,6 @@ export function DashboardPage() {
           <p className="eyebrow">DASHBOARD</p>
           <h2>Dashboard</h2>
         </div>
-        {overview.data ? (
-          <div className="page-chip-group">
-            <div className="page-chip">
-              <Clock3 size={14} strokeWidth={2.2} />
-              <span>{formatDateTime(overview.data.lastSyncedAt ?? overview.data.collector?.finishedAt ?? null)}</span>
-            </div>
-            {overview.refreshing ? (
-              <div className="page-chip loading-chip">
-                <Activity size={14} strokeWidth={2.2} />
-                <span>Refreshing</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
       </section>
 
       <AsyncPane loading={overview.initialLoading} error={overview.error} hasData={overview.hasData}>
