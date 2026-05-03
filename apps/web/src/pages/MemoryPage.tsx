@@ -122,11 +122,6 @@ export function MemoryPage() {
                   <span>No provider data</span>
                 </div>
               ) : null}
-
-              <div className="memory-aggregate-bar">
-                <span>Total threads: <strong>{formatNumber(memory.data.totalThreads)}</strong></span>
-                <span>Total entries: <strong>{formatNumber(memory.data.entries.length)}</strong></span>
-              </div>
             </>
           ) : null}
         </AsyncPane>

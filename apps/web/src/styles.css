@@ -162,7 +162,6 @@ pre {
 .muted,
 .panel-header p,
 .stat-strip-copy p,
-.collector-card p,
 .integration-card p,
 .integration-card small,
 .skill-card p,
@@ -1777,7 +1776,6 @@ pre {
 .session-browser-list,
 .integration-list,
 .memory-list,
-.run-list,
 .snapshot-list,
 .compact-skill-grid,
 .technical-log {
@@ -1874,16 +1872,6 @@ pre {
   display: none;
 }
 
-.memory-aggregate-bar {
-  display: flex;
-  gap: 24px;
-  padding: 12px 16px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
-  margin-top: 4px;
-}
-
 .preference-card,
 .memory-status-card,
 .memory-section {
@@ -1960,7 +1948,6 @@ pre {
 .session-browser-list > * + *,
 .integration-list > * + *,
 .memory-list > * + *,
-.run-list > * + *,
 .snapshot-list > * + *,
 .compact-skill-grid > * + *,
 .technical-log > * + * {
@@ -1983,7 +1970,6 @@ pre {
 .memory-card,
 .integration-card,
 .skill-card,
-.run-row,
 .snapshot-row,
 .timeline-item,
 .subagent-item {
@@ -2045,7 +2031,6 @@ pre {
 
 .session-row p,
 .snapshot-row p,
-.run-row p,
 .integration-card p,
 .skill-card p,
 .memory-summary,
@@ -2056,7 +2041,6 @@ pre {
 
 .session-meta,
 .detail-meta,
-.run-meta,
 .memory-meta,
 .project-card-meta,
 .session-browser-meta {
@@ -2087,7 +2071,6 @@ pre {
   white-space: nowrap;
 }
 
-.collector-card,
 .state-box,
 .detail-hero,
 .subagent-banner,
@@ -2111,14 +2094,6 @@ pre {
 .detail-hero.provider-claude-code {
   border-color: var(--provider-claude-border);
   background: linear-gradient(135deg, var(--provider-claude-bg), rgba(255, 255, 255, 0.03) 60%);
-}
-
-.collector-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
 }
 
 .state-box {
@@ -3029,11 +3004,6 @@ pre {
 
   .skills-provider-column > .memory-provider-header {
     display: flex;
-  }
-
-  .memory-aggregate-bar {
-    flex-direction: column;
-    gap: 12px;
   }
 
   .stat-strip-item {

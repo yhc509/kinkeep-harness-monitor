@@ -1,14 +1,13 @@
 import { useState } from "react";
 import type { TokenPeriodUnit } from "@codex-monitor/shared";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame, RefreshCw } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Flame } from "lucide-react";
 import { apiResourceKeys, getProjectTokenUsage, getTokens } from "../api";
 import { AsyncPane } from "../components/AsyncPane";
 import { ModelUsageDonutChart } from "../components/ModelUsageDonutChart";
 import { Panel } from "../components/Panel";
 import { ProjectBubbleChart } from "../components/ProjectBubbleChart";
 import { StatStrip } from "../components/StatStrip";
-import { StatusPill } from "../components/StatusPill";
 import { useApiResource } from "../hooks/useApiResource";
 import { formatCurrency, formatDateTime, formatDay, formatHour, formatNumber } from "../utils/format";
 
@@ -282,70 +281,45 @@ export function TokensPage() {
                   <span>Hourly totals</span>
                 </summary>
                 <div className="fold-content">
-                <div className="chart-wrap compact">
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={hourlySeries} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barCategoryGap="26%">
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="hourBucket" tickFormatter={formatHour} stroke="rgba(255,255,255,0.4)" axisLine={false} tickLine={false} minTickGap={24} />
-                      <YAxis
-                        width={104}
-                        tickMargin={8}
-                        allowDecimals={false}
-                        tickFormatter={formatChartValue}
-                        stroke="rgba(255,255,255,0.4)"
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <Tooltip
-                        cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                        content={<HourlyTokensTooltip />}
-                      />
-                      <Bar
-                        dataKey="totalTokens"
-                        name="Total tokens"
-                        fill="var(--accent-soft)"
-                        radius={[6, 6, 0, 0]}
-                        maxBarSize={18}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="snapshot-list compact">
-                  {hourlySeries.slice(-8).reverse().map((entry) => (
-                    <article key={entry.hourBucket} className="snapshot-row">
-                      <div>
-                        <strong>{formatDateTime(entry.hourBucket)}</strong>
-                        <p>{formatNumber(entry.requestCount)} token events</p>
-                      </div>
-                      <span>{formatNumber(entry.totalTokens)} · {formatCurrency(entry.estimatedCost)}</span>
-                    </article>
+                  <div className="chart-wrap compact">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={hourlySeries} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barCategoryGap="26%">
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                        <XAxis dataKey="hourBucket" tickFormatter={formatHour} stroke="rgba(255,255,255,0.4)" axisLine={false} tickLine={false} minTickGap={24} />
+                        <YAxis
+                          width={104}
+                          tickMargin={8}
+                          allowDecimals={false}
+                          tickFormatter={formatChartValue}
+                          stroke="rgba(255,255,255,0.4)"
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip
+                          cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                          content={<HourlyTokensTooltip />}
+                        />
+                        <Bar
+                          dataKey="totalTokens"
+                          name="Total tokens"
+                          fill="var(--accent-soft)"
+                          radius={[6, 6, 0, 0]}
+                          maxBarSize={18}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="snapshot-list compact">
+                    {hourlySeries.slice(-8).reverse().map((entry) => (
+                      <article key={entry.hourBucket} className="snapshot-row">
+                        <div>
+                          <strong>{formatDateTime(entry.hourBucket)}</strong>
+                          <p>{formatNumber(entry.requestCount)} token events</p>
+                        </div>
+                        <span>{formatNumber(entry.totalTokens)} · {formatCurrency(entry.estimatedCost)}</span>
+                      </article>
                     ))}
                   </div>
-                </div>
-              </details>
-
-              <details className="fold-panel">
-                <summary className="fold-summary">
-                  <div className="fold-summary-main">
-                    <RefreshCw size={15} strokeWidth={2.2} />
-                    <strong>Sync log</strong>
-                  </div>
-                  <span>Last 20 runs</span>
-                </summary>
-                <div className="fold-content">
-                <div className="run-list">
-                  {tokens.data.collectorRuns.map((run) => (
-                    <article key={run.id} className="run-row">
-                      <div>
-                        <div className="run-meta">
-                          <StatusPill status={run.status} />
-                          <span>{formatDateTime(run.finishedAt)}</span>
-                        </div>
-                        <p>{run.message}</p>
-                      </div>
-                    </article>
-                  ))}
-                </div>
                 </div>
               </details>
             </div>
